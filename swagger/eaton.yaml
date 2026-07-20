@@ -1,0 +1,140 @@
+openapi: 3.0.3
+info:
+  title: Eaton - xComfort system
+  description: Smart Home System
+  version: 1.0.0
+
+tags:
+  - name: Eaton
+    description: xComfort Smart Home
+
+paths: {}
+
+components:
+  schemas:
+    Message:
+      type: string
+      enum:
+        - "5A"
+        - "A5"
+      x-enum-varnames:
+        - SOL
+        - EOL
+    PayloadType:
+      type: string
+      enum:
+        - "B1"
+        - "B2"
+        - "B3"
+        - "C1"
+        - "C3"
+        - "C9"
+      x-enum-varnames:
+        - TX
+        - CONFIG
+        - TX_EXT
+        - RX
+        - STATUS
+        - ERROR
+    TxEventType:
+      type: string
+      enum:
+        - "0A"
+        - "0B"
+        - "0C"
+        - "OD"
+        - "0E"
+        - "0F"
+        - "80"
+      x-enum-varnames:
+        - SWITCH
+        - REQUEST
+        - PERCENT
+        - DIMMING
+        - JALO_MOVE
+        - JALO_STEP
+        - BASIC_MODE
+    TxEventDataType:
+      type: string
+      enum:
+        - "00"
+        - "01"
+        - "00"
+        - "04"
+        - "0F"
+        - "00"
+        - "01"
+        - "00"
+      x-enum-varnames:
+        - SWITCH_OFF
+        - SWITCH_ON
+        - DIMMING_STOP
+        - DIMMING_DARKER
+        - DIMMING_BRIGHTER
+        - JALO_CLOSE
+        - JALO_OPEN
+        - REQUEST_DUMMY
+    RxEventType:
+      type: string
+      enum:
+        - "50"
+        - "51"
+        - "52"
+        - "53"
+        - "54"
+        - "55"
+        - "56"
+        - "57"
+        - "62"
+        - "70"
+      x-enum-varnames:
+        - PUSH_BUTTON_ON
+        - PUSH_BUTTON_OFF
+        - SWITCH_ON
+        - SWITCH_OFF
+        - UP_PRESSED
+        - UP_RELEASED
+        - DOWN_PRESSED
+        - DOWN_RELEASED
+        - ANALOG_VALUE
+        - STATUS
+    RxEventDataType:
+      type: string
+      enum:
+        - "00"
+        - "01"
+        - "03"
+        - "04"
+        - "0D"
+      x-enum-varnames:
+        - NO_DATA
+        - PERCENT
+        - SHORT_POINT
+        - FLOAT
+        - UNSIGNED_SHORT
+    SignalStrength:
+      type: string
+      enum:
+        - GOOD
+        - NORMAL
+        - WEAK
+        - VERY WEAK
+    BatteryLevel:
+      type: string
+      enum:
+        - NOT_AVAILABLE
+        - EMPTY
+        - VERY_WEAK
+        - WEAK
+        - GOOD
+        - NEW
+        - MAINS_OPERATED
+
+    ReceivedMessage:
+      type: object
+      properties:
+        deviceId:
+          type: integer
+          format: int32
+        name:
+          type: string

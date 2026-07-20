@@ -1,0 +1,2 @@
+@JsonProperty(JSON_PROPERTY_{{nameInSnakeCase}})
+@JsonInclude({{#isMap}}{{#items.isNullable}}content = JsonInclude.Include.ALWAYS, {{/items.isNullable}}{{/isMap}}value = JsonInclude.Include.{{#required}}ALWAYS{{/required}}{{^required}}USE_DEFAULTS{{/required}})

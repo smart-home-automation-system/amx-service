@@ -12,10 +12,10 @@ import reactor.core.publisher.Mono;
 import java.util.List;
 import java.util.Objects;
 
-import static cloud.cholewa.eaton.utilities.MessageUtilities.extractDataPoint;
-import static cloud.cholewa.eaton.utilities.MessageUtilities.extractMessage;
-import static cloud.cholewa.eaton.utilities.MessageValidator.isValidEatonMessage;
-import static cloud.cholewa.eaton.utilities.device.TemperatureParser.calculateRoomTemperature;
+import static cloud.cholewa.gateway.eaton.utils.MessageUtilities.extractDataPoint;
+import static cloud.cholewa.gateway.eaton.utils.MessageUtilities.extractMessage;
+import static cloud.cholewa.gateway.eaton.utils.MessageValidator.isValidEatonMessage;
+import static cloud.cholewa.gateway.eaton.utils.device.TemperatureParser.calculateRoomTemperature;
 
 @Service
 @Slf4j

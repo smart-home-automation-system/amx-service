@@ -1,9 +1,9 @@
 package cloud.cholewa.gateway.service;
 
-import cloud.cholewa.eaton.infrastructure.error.EatonException;
-import cloud.cholewa.eaton.infrastructure.error.EatonParsingException;
 import cloud.cholewa.gateway.device.client.DeviceDatabaseClient;
 import cloud.cholewa.gateway.infrastructure.error.ConfigurationCallException;
+import cloud.cholewa.gateway.infrastructure.error.EatonException;
+import cloud.cholewa.gateway.infrastructure.error.EatonParsingException;
 import cloud.cholewa.gateway.rabbit.TemperaturePublisher;
 import cloud.cholewa.home.model.EatonConfigurationResponse;
 import cloud.cholewa.home.model.EatonDatagramReply;

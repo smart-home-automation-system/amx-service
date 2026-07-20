@@ -1,8 +1,8 @@
 package cloud.cholewa.gateway.api;
 
-import cloud.cholewa.eaton.infrastructure.error.EatonParsingException;
-import cloud.cholewa.eaton.infrastructure.error.ErrorDictionary;
 import cloud.cholewa.gateway.config.ExceptionHandlerConfig;
+import cloud.cholewa.gateway.infrastructure.error.EatonParsingException;
+import cloud.cholewa.gateway.infrastructure.error.ErrorDictionary;
 import cloud.cholewa.gateway.service.GatewayService;
 import cloud.cholewa.home.model.EatonDatagramReply;
 import cloud.cholewa.home.model.EatonGatewayType;
