@@ -52,7 +52,7 @@ jobs:
       - name: Build and analyze
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=smart-home-automation-system_gateway-service -DskipTests
+        run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=smart-home-automation-system_amx-service -DskipTests
 
       - name: SonarQube Quality Gate check
         id: sonar
@@ -73,5 +73,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '⚠️ **SonarQube Quality Gate failed**\n\nCheck the details in [SonarCloud](https://sonarcloud.io/project/configuration/GitHubActions?id=smart-home-automation-system_gateway-service)'
+              body: '⚠️ **SonarQube Quality Gate failed**\n\nCheck the details in [SonarCloud](https://sonarcloud.io/project/configuration/GitHubActions?id=smart-home-automation-system_amx-service)'
             })

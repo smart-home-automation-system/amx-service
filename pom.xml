@@ -11,17 +11,17 @@
 	</parent>
 
 	<groupId>cloud.cholewa</groupId>
-	<artifactId>gateway-service</artifactId>
+	<artifactId>amx-service</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 
-	<name>gateway-service</name>
-	<description>gateway-service</description>
+	<name>amx-service</name>
+	<description>amx-service</description>
 
 	<properties>
 		<java.version>17</java.version>
 
 		<sonar.organization>smart-home-automation-system</sonar.organization>
-		<sonar.projectKey>smart-home-automation-system_gateway-service</sonar.projectKey>
+		<sonar.projectKey>smart-home-automation-system_amx-service</sonar.projectKey>
 		<sonar.host.url>https://sonarcloud.io</sonar.host.url>
 
 		<logbook.version>3.12.3</logbook.version>
@@ -224,7 +224,7 @@
 						<configuration>
 							<filesets>
 								<fileset>
-									<directory>${project.basedir}/src/main/java/cloud/cholewa/gateway/eaton/model</directory>
+									<directory>${project.basedir}/src/main/java/cloud/cholewa/amx/eaton/model</directory>
 									<excludes>
 										<exclude>package-info.java</exclude>
 									</excludes>
@@ -248,7 +248,7 @@
 									<library>feign</library>
 									<templateDirectory>${project.basedir}/swagger/templates</templateDirectory>
 									<output>${project.basedir}</output>
-									<modelPackage>cloud.cholewa.gateway.eaton.model</modelPackage>
+									<modelPackage>cloud.cholewa.amx.eaton.model</modelPackage>
 
 									<configOptions>
 										<useJakartaEe>true</useJakartaEe>
@@ -276,7 +276,7 @@
 							<compilerSource>${java.version}</compilerSource>
 							<compilerTargetPlatform>${java.version}</compilerTargetPlatform>
 							<directories>
-								<directory>${project.basedir}/src/main/java/cloud/cholewa/gateway/eaton/model</directory>
+								<directory>${project.basedir}/src/main/java/cloud/cholewa/amx/eaton/model</directory>
 							</directories>
 							<configFile>${project.basedir}/formatter.xml</configFile>
 						</configuration>
@@ -298,7 +298,7 @@
 							<staticAfter>true</staticAfter>
 							<treatSamePackageAsUnused>true</treatSamePackageAsUnused>
 							<directories>
-								<directory>${project.basedir}/src/main/java/cloud/cholewa/gateway/eaton/model</directory>
+								<directory>${project.basedir}/src/main/java/cloud/cholewa/amx/eaton/model</directory>
 							</directories>
 						</configuration>
 						<executions>

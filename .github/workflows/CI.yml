@@ -47,7 +47,7 @@ jobs:
       - name: Verify generated models match spec
         run: |
           mvn -B -Pgenerate-models process-sources
-          git diff --exit-code src/main/java/cloud/cholewa/gateway/eaton/model 
+          git diff --exit-code src/main/java/cloud/cholewa/amx/eaton/model 
 
       - name: Discord notification -> success
         uses: sarisia/actions-status-discord@b8381b25576cb341b2af39926ab42c5056cc44ed #v1.15.5
@@ -55,11 +55,11 @@ jobs:
         with:
           webhook: ${{ secrets.DISCORD_WEBHOOK }}
           status: ${{ job.status }}
-          title: "CI gateway-service - success"
+          title: "CI amx-service - success"
       - name: Discord notification -> non-success
         uses: sarisia/actions-status-discord@b8381b25576cb341b2af39926ab42c5056cc44ed #v1.15.5
         if: ${{ !success() }}
         with:
           webhook: ${{ secrets.DISCORD_WEBHOOK }}
           status: ${{ job.status }}
-          title: "CI gateway-service - failure"
+          title: "CI amx-service - failure"

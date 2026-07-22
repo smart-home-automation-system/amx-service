@@ -1,0 +1,39 @@
+package cloud.cholewa.amx.eaton.model;
+
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonValue;
+
+public enum RxEventDataType {
+
+    NO_DATA("00"),
+    PERCENT("01"),
+    SHORT_POINT("03"),
+    FLOAT("04"),
+    UNSIGNED_SHORT("0D");
+
+    private String value;
+
+    RxEventDataType(String value) {
+        this.value = value;
+    }
+
+    @JsonValue
+    public String getValue() {
+        return value;
+    }
+
+    @Override
+    public String toString() {
+        return String.valueOf(value);
+    }
+
+    @JsonCreator
+    public static RxEventDataType fromValue(String value) {
+        for (RxEventDataType b : RxEventDataType.values()) {
+            if (b.value.equals(value)) {
+                return b;
+            }
+        }
+        throw new IllegalArgumentException("Unexpected value '" + value + "'");
+    }
+}
