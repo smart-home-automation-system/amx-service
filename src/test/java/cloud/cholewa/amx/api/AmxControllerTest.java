@@ -26,11 +26,11 @@ class AmxControllerTest {
     private WebTestClient webTestClient;
 
     @MockitoBean
-    private AmxService gatewayService;
+    private AmxService amxService;
 
     @Test
     void should_successfully_process_message() {
-        when(gatewayService.consumeAmxMessage(any()))
+        when(amxService.consumeAmxMessage(any()))
             .thenReturn(Mono.empty());
 
         webTestClient.post()
@@ -45,7 +45,7 @@ class AmxControllerTest {
 
     @Test
     void should_return_error_when_processing_message_fails() {
-        when(gatewayService.consumeAmxMessage(any()))
+        when(amxService.consumeAmxMessage(any()))
             .thenReturn(Mono.error(new EatonParsingException(CustomError.EXTRACTING_MESSAGE_ERROR)));
 
         webTestClient.post()

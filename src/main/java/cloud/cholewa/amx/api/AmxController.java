@@ -18,11 +18,11 @@ import reactor.core.publisher.Mono;
 @RequiredArgsConstructor
 public class AmxController {
 
-    private final AmxService gatewayService;
+    private final AmxService amxService;
 
     @PostMapping
     Mono<ResponseEntity<Void>> consumeAmxMessage(@RequestBody @Valid EatonDatagramReply reply) {
-        return gatewayService.consumeAmxMessage(reply)
+        return amxService.consumeAmxMessage(reply)
             .doOnSubscribe(subscription ->
                 log.info(
                     "Consuming AMX message from module: {} and content: [{}]",
