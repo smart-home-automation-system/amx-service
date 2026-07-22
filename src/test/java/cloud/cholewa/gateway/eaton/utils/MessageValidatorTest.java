@@ -1,6 +1,6 @@
 package cloud.cholewa.gateway.eaton.utils;
 
-import cloud.cholewa.gateway.infrastructure.error.EatonException;
+import cloud.cholewa.gateway.infrastructure.error.EatonParsingException;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -21,7 +21,7 @@ class MessageValidatorTest {
         final String errorMessage
     ) {
         assertThatThrownBy(() -> isValidEatonMessage(message))
-            .isInstanceOf(EatonException.class)
+            .isInstanceOf(EatonParsingException.class)
             .hasMessage(errorMessage);
     }
 
@@ -74,8 +74,8 @@ class MessageValidatorTest {
     private static Stream<Arguments> validMessages() {
         return Stream.of(
             Arguments.of("PayloadType.TX valid message 6 + 2 bytes", "5A,C,C1,21,70,32,10,A5"),
-            Arguments.of("PayloadType.RX valid message 12 + 2 bytes", "5A,C,C1,21,70,aa,bb,0,1a,b6,0,32,10,A5"),
-            Arguments.of("PayloadType.STATUS valid message 8 + 2 bytes", "5A,C,C1,21,cc,de,70,32,10,A5")
+            Arguments.of("PayloadType.RX valid message 12 + 2 bytes", "5A,C,C1,21,70,AA,BB,0,1A,B6,0,32,10,A5"),
+            Arguments.of("PayloadType.STATUS valid message 8 + 2 bytes", "5A,C,C1,21,CC,DE,70,32,10,A5")
         );
     }
 }

@@ -8,11 +8,10 @@ import org.apache.commons.collections4.CollectionUtils;
 
 import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Collectors;
 
-import static cloud.cholewa.gateway.infrastructure.error.ErrorDictionary.DATA_POINT_INVALID;
-import static cloud.cholewa.gateway.infrastructure.error.ErrorDictionary.EXTRACTING_MESSAGE_ERROR;
-import static cloud.cholewa.gateway.infrastructure.error.ErrorDictionary.MESSAGE_LENGTH_MISMATCH;
+import static cloud.cholewa.gateway.infrastructure.error.CustomError.DATA_POINT_INVALID;
+import static cloud.cholewa.gateway.infrastructure.error.CustomError.EXTRACTING_MESSAGE_ERROR;
+import static cloud.cholewa.gateway.infrastructure.error.CustomError.MESSAGE_LENGTH_MISMATCH;
 
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public class MessageUtilities {
@@ -23,21 +22,20 @@ public class MessageUtilities {
      * and starts with SOL and ends with EOL.
      * */
     public static List<String> extractMessage(final String message) {
-        List<String> elements = Arrays.stream(message.split(","))
+        final List<String> elements = Arrays.stream(message.split(","))
             .filter(element -> !element.isBlank())
-            .collect(Collectors.toList());
+            .toList();
 
-        if (CollectionUtils.isNotEmpty(elements)) {
-            if (elements.get(0).equals(Message.SOL.getValue())) {
-                elements.remove(0);
-            }
-            if (elements.get(elements.size() - 1).equals(Message.EOL.getValue())) {
-                elements.remove(elements.size() - 1);
-            }
-            return elements;
+        if (CollectionUtils.isEmpty(elements)) {
+            throw new EatonParsingException(EXTRACTING_MESSAGE_ERROR);
         }
 
-        throw new EatonParsingException(EXTRACTING_MESSAGE_ERROR);
+        final int from = elements.get(0).equals(Message.SOL.getValue()) ? 1 : 0;
+        final int to = elements.get(elements.size() - 1).equals(Message.EOL.getValue())
+            ? elements.size() - 1
+            : elements.size();
+
+        return elements.subList(from, to);
     }
 
     /*
@@ -48,10 +46,11 @@ public class MessageUtilities {
         throwExceptionWhenMessageLengthInvalid(elements);
 
         try {
-            if (Integer.parseInt(elements.get(2), 16) < 1 || Integer.parseInt(elements.get(2), 16) > 99) {
+            final int dataPoint = Integer.parseInt(elements.get(2), 16);
+            if (dataPoint < 1 || dataPoint > 99) {
                 throw new EatonParsingException(DATA_POINT_INVALID);
             }
-            return Integer.parseInt(elements.get(2), 16);
+            return dataPoint;
         } catch (NumberFormatException e) {
             throw new EatonParsingException(DATA_POINT_INVALID);
         }

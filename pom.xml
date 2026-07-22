@@ -225,6 +225,9 @@
 							<filesets>
 								<fileset>
 									<directory>${project.basedir}/src/main/java/cloud/cholewa/gateway/eaton/model</directory>
+									<excludes>
+										<exclude>package-info.java</exclude>
+									</excludes>
 								</fileset>
 							</filesets>
 						</configuration>
@@ -240,10 +243,10 @@
 								</goals>
 								<configuration>
 									<generatorName>java</generatorName>
-									<inputSpec>${project.basedir}/swagger/eaton.yaml/</inputSpec>
+									<inputSpec>${project.basedir}/swagger/eaton.yaml</inputSpec>
 
 									<library>feign</library>
-									<templateDirectory>../gateway-service/swagger/templates</templateDirectory>
+									<templateDirectory>${project.basedir}/swagger/templates</templateDirectory>
 									<output>${project.basedir}</output>
 									<modelPackage>cloud.cholewa.gateway.eaton.model</modelPackage>
 

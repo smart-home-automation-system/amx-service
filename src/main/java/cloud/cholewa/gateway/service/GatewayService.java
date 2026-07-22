@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 
 import static cloud.cholewa.gateway.eaton.utils.MessageUtilities.extractDataPoint;
@@ -26,14 +27,17 @@ public class GatewayService {
     private final TemperaturePublisher temperaturePublisher;
 
     public Mono<Void> consumeAmxMessage(final EatonDatagramReply reply) {
-        return Mono.fromCallable(() -> isValidEatonMessage(reply.getMessage()))
-            .filter(valid -> valid)
-            .map(valid -> extractMessage(reply.getMessage()))
-            .zipWhen(message ->
-                deviceDatabaseClient.getEatonConfiguration(extractDataPoint(message), reply.getGateway()))
-            .doOnNext(tuple ->
-                log.info("Publishing message type: {} for room: {}", tuple.getT2().getType(), tuple.getT2().getRoom()))
-            .flatMap(tuple -> publishOnRabbit(tuple.getT1(), tuple.getT2()));
+        return Mono.justOrEmpty(reply.getMessage().trim().toUpperCase(Locale.ROOT))
+            .flatMap(frame ->
+                Mono.fromCallable(() -> isValidEatonMessage(frame))
+                    .filter(Boolean::booleanValue)
+                    .map(isValid -> extractMessage(frame))
+                    .zipWhen(message ->
+                        deviceDatabaseClient.getEatonConfiguration(extractDataPoint(message), reply.getGateway()))
+                    .doOnNext(t ->
+                        log.info("Publishing message type: {} for room: {}", t.getT2().getType(), t.getT2().getRoom()))
+                    .flatMap(t -> publishOnRabbit(t.getT1(), t.getT2()))
+            );
     }
 
     private Mono<Void> publishOnRabbit(final List<String> message, final EatonConfigurationResponse configuration) {

@@ -1,23 +1,30 @@
 package cloud.cholewa.gateway.eaton.utils;
 
-import cloud.cholewa.gateway.infrastructure.error.EatonException;
+import cloud.cholewa.gateway.infrastructure.error.EatonParsingException;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.Strings;
+
+import java.util.regex.Pattern;
 
 import static cloud.cholewa.gateway.eaton.model.Message.EOL;
 import static cloud.cholewa.gateway.eaton.model.Message.SOL;
-import static cloud.cholewa.gateway.infrastructure.error.ErrorDictionary.INVALID_MESSAGE_LENGTH;
-import static cloud.cholewa.gateway.infrastructure.error.ErrorDictionary.MISSING_SOL_OR_EOL;
-import static cloud.cholewa.gateway.infrastructure.error.ErrorDictionary.NON_HEX_VALUES;
+import static cloud.cholewa.gateway.infrastructure.error.CustomError.INVALID_MESSAGE_LENGTH;
+import static cloud.cholewa.gateway.infrastructure.error.CustomError.MISSING_SOL_OR_EOL;
+import static cloud.cholewa.gateway.infrastructure.error.CustomError.NON_HEX_VALUES;
 
+@Slf4j
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public class MessageValidator {
 
+    private static final Pattern HEX = Pattern.compile("[A-F0-9]{1,2}");
+
     public static boolean isValidEatonMessage(final String message) {
-        throwExceptionWhenUnknownMessageLength(message);
+        final String[] messageParts = message.split(",");
+        throwExceptionWhenUnknownMessageLength(messageParts);
         throwExceptionWhenInvalidStartOrEndByte(message);
-        throwExceptionWhenInvalidHexValues(message);
+        throwExceptionWhenInvalidHexValues(messageParts);
         return true;
     }
 
@@ -28,12 +35,11 @@ public class MessageValidator {
      * 3. PayloadType.STATUS - C3 - 8 bytes
      * There are an additional two bytes for SOL and EOL
      * */
-    private static void throwExceptionWhenUnknownMessageLength(final String message) {
-        String[] messageParts = message.split(",");
+    private static void throwExceptionWhenUnknownMessageLength(final String[] messageParts) {
         if (messageParts.length == 14 || messageParts.length == 10 || messageParts.length == 8) {
             return;
         }
-        throw new EatonException(INVALID_MESSAGE_LENGTH);
+        throw new EatonParsingException(INVALID_MESSAGE_LENGTH);
     }
 
     /*
@@ -41,16 +47,14 @@ public class MessageValidator {
      * */
     private static void throwExceptionWhenInvalidStartOrEndByte(final String message) {
         if (!Strings.CI.startsWith(message, SOL.getValue()) || !Strings.CI.endsWith(message, EOL.getValue())) {
-            throw new EatonException(MISSING_SOL_OR_EOL);
+            throw new EatonParsingException(MISSING_SOL_OR_EOL);
         }
     }
 
-    private static void throwExceptionWhenInvalidHexValues(final String message) {
-        String[] singleByte = message.split(",");
-
-        for (String s : singleByte) {
-            if (!s.matches("[a-fA-F0-9]{1,2}")) {
-                throw new EatonException(NON_HEX_VALUES);
+    private static void throwExceptionWhenInvalidHexValues(final String[] messageParts) {
+        for (String s : messageParts) {
+            if (!HEX.matcher(s).matches()) {
+                throw new EatonParsingException(NON_HEX_VALUES);
             }
         }
     }

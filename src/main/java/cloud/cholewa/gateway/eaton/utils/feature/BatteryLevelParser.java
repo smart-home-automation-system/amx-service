@@ -1,8 +1,7 @@
 package cloud.cholewa.gateway.eaton.utils.feature;
 
 import cloud.cholewa.gateway.eaton.model.BatteryLevel;
-import cloud.cholewa.gateway.infrastructure.error.EatonException;
-import cloud.cholewa.gateway.infrastructure.error.ErrorDictionary;
+import cloud.cholewa.gateway.infrastructure.error.EatonParsingException;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
@@ -13,6 +12,7 @@ import static cloud.cholewa.gateway.eaton.model.BatteryLevel.NEW;
 import static cloud.cholewa.gateway.eaton.model.BatteryLevel.NOT_AVAILABLE;
 import static cloud.cholewa.gateway.eaton.model.BatteryLevel.VERY_WEAK;
 import static cloud.cholewa.gateway.eaton.model.BatteryLevel.WEAK;
+import static cloud.cholewa.gateway.infrastructure.error.CustomError.BATTERY_LEVEL_INVALID;
 
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public class BatteryLevelParser {
@@ -26,7 +26,7 @@ public class BatteryLevelParser {
             case "4" -> GOOD;
             case "5" -> NEW;
             case "10" -> MAINS_OPERATED;
-            default -> throw new EatonException(ErrorDictionary.BATTERY_LEVEL_INVALID);
+            default -> throw new EatonParsingException(BATTERY_LEVEL_INVALID);
         };
     }
 }

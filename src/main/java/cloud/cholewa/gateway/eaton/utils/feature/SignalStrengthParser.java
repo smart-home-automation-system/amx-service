@@ -1,11 +1,11 @@
 package cloud.cholewa.gateway.eaton.utils.feature;
 
 import cloud.cholewa.gateway.eaton.model.SignalStrength;
-import cloud.cholewa.gateway.infrastructure.error.EatonException;
+import cloud.cholewa.gateway.infrastructure.error.EatonParsingException;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
-import static cloud.cholewa.gateway.infrastructure.error.ErrorDictionary.SIGNAL_STRENGTH_INVALID;
+import static cloud.cholewa.gateway.infrastructure.error.CustomError.SIGNAL_STRENGTH_INVALID;
 
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public class SignalStrengthParser {
@@ -16,11 +16,11 @@ public class SignalStrengthParser {
         try {
             parsedInt = Integer.parseInt(value, 16);
         } catch (NumberFormatException e) {
-            throw new EatonException(SIGNAL_STRENGTH_INVALID);
+            throw new EatonParsingException(SIGNAL_STRENGTH_INVALID);
         }
 
         if (value.length() > 2 || parsedInt > 255) {
-            throw new EatonException(SIGNAL_STRENGTH_INVALID);
+            throw new EatonParsingException(SIGNAL_STRENGTH_INVALID);
         }
 
         if (parsedInt <= 67) {
@@ -32,7 +32,7 @@ public class SignalStrengthParser {
         } else if (parsedInt <= 120) {
             return SignalStrength.VERY_WEAK;
         } else {
-            throw new EatonException(SIGNAL_STRENGTH_INVALID);
+            throw new EatonParsingException(SIGNAL_STRENGTH_INVALID);
         }
     }
 }

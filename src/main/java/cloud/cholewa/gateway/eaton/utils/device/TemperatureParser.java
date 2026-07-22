@@ -6,8 +6,8 @@ import lombok.NoArgsConstructor;
 
 import java.util.List;
 
-import static cloud.cholewa.gateway.infrastructure.error.ErrorDictionary.TEMPERATURE_SENSOR_INVALID_DEVICE_TYPE;
-import static cloud.cholewa.gateway.infrastructure.error.ErrorDictionary.TEMPERATURE_SENSOR_INVALID_MESSAGE_LENGTH;
+import static cloud.cholewa.gateway.infrastructure.error.CustomError.TEMPERATURE_SENSOR_INVALID_DEVICE_TYPE;
+import static cloud.cholewa.gateway.infrastructure.error.CustomError.TEMPERATURE_SENSOR_INVALID_MESSAGE_LENGTH;
 
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public class TemperatureParser {

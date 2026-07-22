@@ -8,7 +8,7 @@ public enum TxEventType {
     SWITCH("0A"),
     REQUEST("0B"),
     PERCENT("0C"),
-    DIMMING("OD"),
+    DIMMING("0D"),
     JALO_MOVE("0E"),
     JALO_STEP("0F"),
     BASIC_MODE("80");

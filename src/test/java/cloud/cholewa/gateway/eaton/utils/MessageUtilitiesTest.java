@@ -49,6 +49,11 @@ class MessageUtilitiesTest {
                 "SOL and EOL in middle",
                 "5A,C,C1,11,70,0,5A,0,A5,0,0,44,10,A5",
                 List.of("C", "C1", "11", "70", "0", "5A", "0", "A5", "0", "0", "44", "10")
+            ),
+            Arguments.of(
+                "message without SOL and EOL kept intact",
+                "8,C3,1C,4,0,0,0,0",
+                List.of("8", "C3", "1C", "4", "0", "0", "0", "0")
             )
         );
     }
