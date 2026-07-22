@@ -1,8 +1,8 @@
 package cloud.cholewa.gateway.config;
 
 import cloud.cholewa.commons.error.GlobalErrorExceptionHandler;
-import cloud.cholewa.eaton.infrastructure.error.EatonParsingException;
 import cloud.cholewa.gateway.infrastructure.error.ConfigurationCallException;
+import cloud.cholewa.gateway.infrastructure.error.EatonParsingException;
 import cloud.cholewa.gateway.infrastructure.error.HeatingCallException;
 import cloud.cholewa.gateway.infrastructure.error.processor.ConfigurationCallExceptionProcessor;
 import cloud.cholewa.gateway.infrastructure.error.processor.EatonParsingExceptionProcessor;

@@ -43,6 +43,11 @@ jobs:
 
       - name: Build with Maven
         run: mvn -B package --file pom.xml
+        
+      - name: Verify generated models match spec
+        run: |
+          mvn -B -Pgenerate-models process-sources
+          git diff --exit-code src/main/java/cloud/cholewa/gateway/eaton/model 
 
       - name: Discord notification -> success
         uses: sarisia/actions-status-discord@b8381b25576cb341b2af39926ab42c5056cc44ed #v1.15.5

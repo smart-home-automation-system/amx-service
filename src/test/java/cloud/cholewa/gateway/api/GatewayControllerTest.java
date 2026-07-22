@@ -1,8 +1,8 @@
 package cloud.cholewa.gateway.api;
 
-import cloud.cholewa.eaton.infrastructure.error.EatonParsingException;
-import cloud.cholewa.eaton.infrastructure.error.ErrorDictionary;
 import cloud.cholewa.gateway.config.ExceptionHandlerConfig;
+import cloud.cholewa.gateway.infrastructure.error.CustomError;
+import cloud.cholewa.gateway.infrastructure.error.EatonParsingException;
 import cloud.cholewa.gateway.service.GatewayService;
 import cloud.cholewa.home.model.EatonDatagramReply;
 import cloud.cholewa.home.model.EatonGatewayType;
@@ -46,7 +46,7 @@ class GatewayControllerTest {
     @Test
     void should_return_error_when_processing_message_fails() {
         when(gatewayService.consumeAmxMessage(any()))
-            .thenReturn(Mono.error(new EatonParsingException(ErrorDictionary.EXTRACTING_MESSAGE_ERROR)));
+            .thenReturn(Mono.error(new EatonParsingException(CustomError.EXTRACTING_MESSAGE_ERROR)));
 
         webTestClient.post()
             .uri("/amx")

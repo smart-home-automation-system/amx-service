@@ -1,9 +1,8 @@
 package cloud.cholewa.gateway.service;
 
-import cloud.cholewa.eaton.infrastructure.error.EatonException;
-import cloud.cholewa.eaton.infrastructure.error.EatonParsingException;
 import cloud.cholewa.gateway.device.client.DeviceDatabaseClient;
 import cloud.cholewa.gateway.infrastructure.error.ConfigurationCallException;
+import cloud.cholewa.gateway.infrastructure.error.EatonParsingException;
 import cloud.cholewa.gateway.rabbit.TemperaturePublisher;
 import cloud.cholewa.home.model.EatonConfigurationResponse;
 import cloud.cholewa.home.model.EatonDatagramReply;
@@ -54,7 +53,7 @@ class GatewayServiceTest {
             .as(StepVerifier::create)
             .expectErrorSatisfies(throwable -> {
                 assertThat(throwable)
-                    .isInstanceOf(EatonException.class)
+                    .isInstanceOf(EatonParsingException.class)
                     .hasMessageContaining("Invalid Eaton message");
             })
             .verify();
@@ -100,7 +99,7 @@ class GatewayServiceTest {
             })
             .verify();
 
-        verify(deviceDatabaseClient, times(1)).getEatonConfiguration(anyInt(), any());
+        verify(deviceDatabaseClient).getEatonConfiguration(anyInt(), any());
         verify(temperaturePublisher, never()).publish(anyDouble(), any());
 
         verifyNoMoreInteractions(deviceDatabaseClient);
@@ -129,9 +128,35 @@ class GatewayServiceTest {
             })
             .verify();
 
-        verify(deviceDatabaseClient, times(1)).getEatonConfiguration(anyInt(), any());
+        verify(deviceDatabaseClient).getEatonConfiguration(anyInt(), any());
         verify(temperaturePublisher, never()).publish(anyDouble(), any());
         verifyNoMoreInteractions(deviceDatabaseClient);
+    }
+
+    @Test
+    void should_normalize_lowercase_frame_and_publish_negative_temperature() {
+        when(deviceDatabaseClient.getEatonConfiguration(anyInt(), any()))
+            .thenReturn(Mono.just(EatonConfigurationResponse.builder()
+                .point(18)
+                .type(SmartDeviceType.TEMPERATURE_SENSOR)
+                .room(RoomName.KITCHEN)
+                .build()));
+
+        when(temperaturePublisher.publish(anyDouble(), any())).thenReturn(Mono.empty());
+
+        final EatonDatagramReply lowercaseMessage = EatonDatagramReply.builder()
+            .gateway(EatonGatewayType.BLINDS)
+            .message("5a,c,c1,12,62,3,0,ff,db,0,0,44,5,a5")
+            .build();
+
+        sut.consumeAmxMessage(lowercaseMessage)
+            .as(StepVerifier::create)
+            .verifyComplete();
+
+        verify(deviceDatabaseClient).getEatonConfiguration(anyInt(), any());
+        verify(temperaturePublisher).publish(-3.7, RoomName.KITCHEN);
+
+        verifyNoMoreInteractions(deviceDatabaseClient, temperaturePublisher);
     }
 
     @Test
@@ -154,8 +179,8 @@ class GatewayServiceTest {
             .as(StepVerifier::create)
             .verifyComplete();
 
-        verify(deviceDatabaseClient, times(1)).getEatonConfiguration(anyInt(), any());
-        verify(temperaturePublisher, times(1)).publish(anyDouble(), any());
+        verify(deviceDatabaseClient).getEatonConfiguration(anyInt(), any());
+        verify(temperaturePublisher).publish(0.0, RoomName.KITCHEN);
 
         verifyNoMoreInteractions(deviceDatabaseClient, temperaturePublisher);
     }
