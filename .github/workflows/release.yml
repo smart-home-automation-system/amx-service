@@ -24,30 +24,44 @@ jobs:
             echo "GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo 'latest')" >> $GITHUB_OUTPUT
           fi
 
+      - name: Configure Maven settings for GitHub Packages
+        run: |
+          mkdir -p ~/.m2
+          cat > ~/.m2/settings.xml <<'XML'
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+            <servers>
+              <server>
+                <id>github-prv</id>
+                <username>${env.GH_PRV_USERNAME}</username>
+                <password>${env.GH_PRV_PASSWORD}</password>
+              </server>
+              <server>
+                <id>github-org-smart-home</id>
+                <username>${env.GH_PRV_USERNAME}</username>
+                <password>${env.GH_PRV_PASSWORD}</password>
+              </server>
+            </servers>
+          </settings>
+          XML
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: 'maven'
-          server-id: github-prv
-          server-username: x-access-token
-          server-password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Maven settings for organization
-        uses: actions/setup-java@v5
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-          server-id: github-org-smart-home
-          server-username: x-access-token
-          server-password: ${{ secrets.GITHUB_TOKEN }}
           overwrite-settings: false
 
       - name: Set project version
+        env:
+          GH_PRV_USERNAME: ${{ secrets.GH_PRV_USERNAME }}
+          GH_PRV_PASSWORD: ${{ secrets.GH_PRV_PASSWORD }}
         run: mvn versions:set -DnewVersion=${{ steps.version.outputs.GIT_TAG }}
 
       - name: Build with Maven
+        env:
+          GH_PRV_USERNAME: ${{ secrets.GH_PRV_USERNAME }}
+          GH_PRV_PASSWORD: ${{ secrets.GH_PRV_PASSWORD }}
         run: mvn -B package -DskipTests --file pom.xml
 
       - name: Log in to Docker Hub
