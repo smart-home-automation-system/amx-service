@@ -23,6 +23,8 @@
 		<sonar.organization>smart-home-automation-system</sonar.organization>
 		<sonar.projectKey>smart-home-automation-system_amx-service</sonar.projectKey>
 		<sonar.host.url>https://sonarcloud.io</sonar.host.url>
+		<!-- openapi-generated models (generate-models profile writes them into src/main/java) -->
+		<sonar.coverage.exclusions>**/eaton/model/**</sonar.coverage.exclusions>
 
 		<logbook.version>3.12.3</logbook.version>
 		<mockwebserver.version>5.4.0</mockwebserver.version>
