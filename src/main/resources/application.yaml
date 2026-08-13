@@ -6,6 +6,10 @@ spring:
     active: home
   webflux:
     base-path: "/home"
+  reactor:
+    # default LIMITED restores ThreadLocals only in "tap" and "handle", so traceId would be
+    # missing from the MDC of every log statement inside a reactive chain
+    context-propagation: auto
   rabbitmq:
     host: rabbitmq-headless
     port: 5672
@@ -15,6 +19,9 @@ spring:
     connection-timeout: 10s
     requested-heartbeat: 30s
     template:
+      # defaults to false; without it the trace breaks at the queue between amx-service
+      # and its consumers (heating-service, notification-service)
+      observation-enabled: true
       retry:
         enabled: true
         initial-interval: 1000ms
@@ -22,6 +29,22 @@ spring:
 
 server:
   port: 6200
+management:
+  server:
+    port: 8200
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  tracing:
+    sampling:
+      # default 0.1; a home system generates so little traffic that sampling everything is free,
+      # and a partially sampled trace is useless when it is the only record of a request
+      probability: 1.0
 
 internal:
   service:
@@ -31,9 +54,12 @@ internal:
 
 logbook:
   format:
-    style: http
+    style: json
 
 logging:
+  structured:
+    format:
+      console: logstash
   level:
     org.zalando.logbook: trace
     org.springframework.amqp: INFO
@@ -59,3 +85,28 @@ internal:
     database:
       host: localhost
       port: 6005
+
+logbook:
+  format:
+    style: http
+
+logging:
+  structured:
+    format:
+      console: ""
+
+---
+
+spring:
+  config:
+    activate:
+      on-profile: test
+
+logbook:
+  format:
+    style: http
+
+logging:
+  structured:
+    format:
+      console: ""

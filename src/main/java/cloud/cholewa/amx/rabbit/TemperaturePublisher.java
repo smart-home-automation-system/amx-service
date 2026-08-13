@@ -10,6 +10,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Slf4j
 @Service
@@ -25,7 +26,7 @@ public class TemperaturePublisher {
                     "temperature.events",
                     "",
                     TemperatureMessage.builder()
-                        .date(LocalDateTime.now())
+                        .date(LocalDateTime.now(ZoneId.systemDefault()))
                         .room(room)
                         .temperature(temperature)
                         .build()
