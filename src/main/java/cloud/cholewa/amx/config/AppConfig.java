@@ -7,11 +7,9 @@ import org.springframework.web.reactive.function.client.WebClient;
 @Configuration
 public class AppConfig {
 
-    @Bean
-    WebClient.Builder webClientBuilder() {
-        return WebClient.builder();
-    }
-
+    //the builder is the autoconfigured one (spring-boot-starter-webclient): only a WebClient built
+    //from it carries the observation customizer, so an own builder bean would drop the trace
+    //on every call to database-service
     @Bean
     WebClient webClient(final WebClient.Builder webClientBuilder) {
         return webClientBuilder.build();
