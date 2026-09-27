@@ -35,9 +35,7 @@ class DeviceDatabaseClientTest {
         mockWebServer = new MockWebServer();
         mockWebServer.start(3000);
 
-        final DeviceDatabaseClientConfig config = new DeviceDatabaseClientConfig("localhost", "3000", Duration.ofMillis(200));
-
-        sut = new DeviceDatabaseClient(WebClient.create(), config);
+        sut = clientWithTimeout(Duration.ofSeconds(5));
     }
 
     @SneakyThrows
@@ -78,12 +76,14 @@ class DeviceDatabaseClientTest {
             .setHeadersDelay(2, TimeUnit.SECONDS)
         );
 
-        sut.getEatonConfiguration(56, EatonGatewayType.BLINDS)
+        //a short bound only here: the first call of a fresh WebClient initialises Netty, which on a CI
+        //runner with JaCoCo instrumentation alone can take longer than this
+        clientWithTimeout(Duration.ofMillis(200)).getEatonConfiguration(56, EatonGatewayType.BLINDS)
             .as(StepVerifier::create)
             .expectErrorSatisfies(throwable -> assertThat(throwable)
                 .isInstanceOfSatisfying(ConfigurationCallException.class, exception ->
                     assertThat(exception.getHttpStatus()).isEqualTo(HttpStatus.GATEWAY_TIMEOUT)))
-            .verify(Duration.ofSeconds(1));
+            .verify(Duration.ofSeconds(3));
     }
 
     @Test
@@ -102,5 +102,12 @@ class DeviceDatabaseClientTest {
                 assertThat(eatonConfigurationResponse.getRoom()).isEqualTo(RoomName.ENTRANCE);
             })
             .verifyComplete();
+    }
+
+    private static DeviceDatabaseClient clientWithTimeout(final Duration responseTimeout) {
+        return new DeviceDatabaseClient(
+            WebClient.create(),
+            new DeviceDatabaseClientConfig("localhost", "3000", responseTimeout)
+        );
     }
 }
