@@ -47,6 +47,11 @@ mvn spring-boot:run -Dspring-boot.run.profiles=home,local
 The `local` profile expects `database-service` on `localhost:6005` and RabbitMQ on
 `localhost:5672`; the Actuator exposes `health`, `info` and `prometheus`.
 
+The lookup in `database-service` is bounded by `internal.service.database.response-timeout`
+(default `PT5S`, well below the gateway's 30 s); a lookup that runs out logs
+`Error processing configuration call: database-service did not answer within …` instead of
+holding the AMX request until the gateway gives up.
+
 ## API
 
 Base path `/home` (`spring.webflux.base-path`); in the cluster the ingress routes
