@@ -13,8 +13,10 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
 import reactor.core.publisher.Mono;
 
+import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
 
@@ -53,11 +55,44 @@ public class DeviceDatabaseClient {
                     .message("Configuration call timed out")
                     .details("database-service did not answer within " + config.responseTimeout())
                     .build())
+            ))
+            //connection refused, DNS failure, reset - database-service is unreachable, not just slow
+            .onErrorMap(WebClientRequestException.class, e -> new ConfigurationCallException(
+                HttpStatus.BAD_GATEWAY,
+                Set.of(ErrorMessage.builder()
+                    .message("Configuration call failed")
+                    .details("database-service unreachable: " + e.getClass().getSimpleName())
+                    .build())
             ));
     }
 
+    //The status comes from the response, not from the body: Errors.httpStatus is @JsonIgnore, so it is
+    //always null after decoding. Only a 404 is relayed - database-service knows no device for the data
+    //point. Any other error, a 4xx included (a request amx-service built wrongly), is a failure behind
+    //amx-service: a bad gateway for its caller, logged at ERROR. The downstream status goes into the details,
+    //which are all the log line has when the body is not the Errors contract.
     private static @NonNull Mono<Throwable> mapErrorToException(final ClientResponse clientResponse) {
+        final int downstreamStatus = clientResponse.statusCode().value();
+        final HttpStatus status = downstreamStatus == HttpStatus.NOT_FOUND.value()
+            ? HttpStatus.NOT_FOUND
+            : HttpStatus.BAD_GATEWAY;
+        final ErrorMessage downstream = ErrorMessage.builder()
+            .message("Configuration call failed")
+            .details("database-service answered " + downstreamStatus)
+            .build();
+
         return clientResponse.bodyToMono(Errors.class)
-            .flatMap(o -> Mono.error(new ConfigurationCallException(o.getHttpStatus(), o.getErrors())));
+            .mapNotNull(Errors::getErrors)
+            //a body that is not the Errors contract (e.g. a proxy's HTML page) must not hide the status
+            .onErrorResume(e -> {
+                log.warn("Unreadable error body from database-service ({}): {}", downstreamStatus, e.getClass().getSimpleName());
+                return Mono.empty();
+            })
+            .defaultIfEmpty(Set.of())
+            .<Throwable>map(errors -> {
+                final Set<ErrorMessage> messages = new LinkedHashSet<>(errors);
+                messages.add(downstream);
+                return new ConfigurationCallException(status, messages);
+            });
     }
 }
