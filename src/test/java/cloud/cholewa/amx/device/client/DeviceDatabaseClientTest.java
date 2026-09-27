@@ -18,6 +18,9 @@ import org.springframework.http.MediaType;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.test.StepVerifier;
 
+import java.time.Duration;
+import java.util.concurrent.TimeUnit;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 @ExtendWith(MockitoExtension.class)
@@ -32,7 +35,7 @@ class DeviceDatabaseClientTest {
         mockWebServer = new MockWebServer();
         mockWebServer.start(3000);
 
-        final DeviceDatabaseClientConfig config = new DeviceDatabaseClientConfig("localhost", "3000");
+        final DeviceDatabaseClientConfig config = new DeviceDatabaseClientConfig("localhost", "3000", Duration.ofMillis(200));
 
         sut = new DeviceDatabaseClient(WebClient.create(), config);
     }
@@ -64,6 +67,23 @@ class DeviceDatabaseClientTest {
             .as(StepVerifier::create)
             .expectError(ConfigurationCallException.class)
             .verify();
+    }
+
+    @Test
+    void should_return_gateway_timeout__when_database_service_does_not_answer_in_time() {
+        mockWebServer.enqueue(new MockResponse()
+            .setResponseCode(HttpStatus.OK.value())
+            .addHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+            .setBody("{\"point\":56,\"type\":\"temperature sensor\",\"room\":\"entrance\"}")
+            .setHeadersDelay(2, TimeUnit.SECONDS)
+        );
+
+        sut.getEatonConfiguration(56, EatonGatewayType.BLINDS)
+            .as(StepVerifier::create)
+            .expectErrorSatisfies(throwable -> assertThat(throwable)
+                .isInstanceOfSatisfying(ConfigurationCallException.class, exception ->
+                    assertThat(exception.getHttpStatus()).isEqualTo(HttpStatus.GATEWAY_TIMEOUT)))
+            .verify(Duration.ofSeconds(1));
     }
 
     @Test
