@@ -52,6 +52,13 @@ The lookup in `database-service` is bounded by `internal.service.database.respon
 `Error processing configuration call: database-service did not answer within …` instead of
 holding the AMX request until the gateway gives up.
 
+When the lookup fails, `POST /home/amx` answers with a status that says whose problem it is:
+`404` when `database-service` knows no device for the data point, `502` when
+`database-service` fails or cannot be reached (any 5xx, any 4xx other than 404, an error body
+that is not the `Errors` contract, connection refused) and `504` when it does not answer within
+the timeout. A malformed frame stays `400`. The log line names the status `database-service`
+answered.
+
 ## API
 
 Base path `/home` (`spring.webflux.base-path`); in the cluster the ingress routes
