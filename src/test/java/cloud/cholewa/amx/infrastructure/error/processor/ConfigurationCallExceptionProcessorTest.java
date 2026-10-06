@@ -35,6 +35,25 @@ class ConfigurationCallExceptionProcessorTest {
     }
 
     @Test
+    void should_keep_the_downstream_messages_out_of_the_answer() {
+        final Errors errors = sut.apply(new ConfigurationCallException(
+            HttpStatus.BAD_GATEWAY,
+            Set.of(ErrorMessage.builder().message("m").details("database-service answered 500").build()),
+            Set.of(ErrorMessage.builder().message("Internal error").details("bad SQL grammar").build())
+        ));
+
+        assertThat(errors.getErrors()).extracting(ErrorMessage::getDetails)
+            .containsExactly("database-service answered 500");
+    }
+
+    @Test
+    void should_answer_when_the_exception_carries_no_messages_at_all() {
+        final Errors errors = sut.apply(new ConfigurationCallException(HttpStatus.BAD_GATEWAY, null, null));
+
+        assertThat(errors.getHttpStatus()).isEqualTo(HttpStatus.BAD_GATEWAY);
+    }
+
+    @Test
     void should_fall_back_to_the_message_when_an_error_has_no_details() {
         final Errors errors = sut.apply(new ConfigurationCallException(
             HttpStatus.BAD_GATEWAY, Set.of(ErrorMessage.builder().message("boom").build())
