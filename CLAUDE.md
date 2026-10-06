@@ -109,6 +109,12 @@ the ingress → `api-gateway-service`) → `AmxController` → `AmxService`:
   needs it: the first call of a fresh `WebClient` initialises Netty, which on the CI runner with
   JaCoCo can take longer than a few hundred milliseconds.
 
+- **The RabbitMQ connection is named after the pod** (`RabbitConfig`, HAS-106): the broker shows
+  `amx-service-<pod id>`, which tells the old pod from the new one during a rollout.
+  `HOSTNAME` is taken only when it starts with `spring.application.name` — outside the cluster
+  it is missing, empty, a workstation or a container id, and the name is then
+  `amx-service-local`. The same convention holds in every service that talks to the broker.
+
 ## CI/CD
 
 `CI.yml`, `sonar.yml` (SonarCloud + JaCoCo), `release.yml` (GitHub release → Docker image
