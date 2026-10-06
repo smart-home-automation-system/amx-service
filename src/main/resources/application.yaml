@@ -20,7 +20,7 @@ spring:
     requested-heartbeat: 30s
     template:
       # defaults to false; without it the trace breaks at the queue between amx-service
-      # and its consumers (heating-service, notification-service)
+      # and its consumer (heating-service)
       observation-enabled: true
       retry:
         enabled: true

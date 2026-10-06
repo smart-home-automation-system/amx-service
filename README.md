@@ -30,7 +30,7 @@ The AMX/NetLinx controller forwards every datagram it receives from the Eaton wi
 (blinds, lights, sensors) to this service. The service validates the frame, parses it into a
 domain message, asks `database-service` which device the data point belongs to, and publishes the
 result on RabbitMQ for the services that act on it — today the room temperatures consumed by
-`heating-service` and `notification-service`.
+`heating-service`.
 
 ## Run locally
 
