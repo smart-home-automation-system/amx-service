@@ -77,6 +77,32 @@ class DeviceDatabaseClientTest {
             .verify();
     }
 
+    @Test
+    void should_relay_only_the_message_that_carries_the_code() {
+        mockWebServer.enqueue(new MockResponse.Builder()
+            .code(HttpStatus.NOT_FOUND.value())
+            .addHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+            .body("""
+                {"errors":[{"message":"Device configuration not found","details":"point 71",
+                            "code":"NOT_FOUND_DEVICE_CONFIGURATION"},
+                           {"message":"Internal error","details":"bad SQL grammar"}]}
+                """)
+            .build()
+        );
+
+        sut.getEatonConfiguration(71, EatonGatewayType.BLINDS)
+            .as(StepVerifier::create)
+            .expectErrorSatisfies(throwable -> assertThat(throwable)
+                .isInstanceOfSatisfying(ConfigurationCallException.class, exception -> {
+                    assertThat(exception.getHttpStatus()).isEqualTo(HttpStatus.NOT_FOUND);
+                    assertThat(exception.getErrorMessages()).extracting(ErrorMessage::getDetails)
+                        .containsExactly("point 71", "database-service answered 404");
+                    assertThat(exception.getDownstreamMessages()).extracting(ErrorMessage::getDetails)
+                        .containsExactly("bad SQL grammar");
+                }))
+            .verify();
+    }
+
     //a 404 alone does not say what is missing: the data point, or the path it was asked under
     @ParameterizedTest
     @ValueSource(strings = {

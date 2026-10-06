@@ -57,7 +57,13 @@ the ingress → `api-gateway-service`) → `AmxController` → `AmxService`:
   `switchIfEmpty` the datagram was dropped and answered 200, with no log line), a connection
   lost in the middle of the body and a body that does not decode all become 502. The last
   `onErrorMap` catches whatever is not a `ConfigurationCallException` yet; it puts only the
-  **type** of the failure into the details, because a decoding error quotes the body.
+  **type** of the failure into the details, because a decoding error quotes the body, and logs
+  the exception itself at WARN (the ERROR line stays the processor's, one per failure). JSON
+  that is no configuration counts as no answer too: `{}` decodes into an object of nulls —
+  `@NotNull` on the SDK model is not enforced on decode — so the client checks `type` and
+  `room` itself, or the failure would surface in `AmxService` as a 500.
+- **Of a relayed 404 only the message carrying the code is answered**; any other message in the
+  same body goes to the log like the body of a failure.
 - **The code is a string owned by `database-service`** (`CustomErrorDescription`, pinned there by
   `CustomErrorDescriptionTest`; sent since its 0.8.0). `UNKNOWN_DATA_POINT_CODE` repeats it —
   nothing compiles against the other repo, so a rename on that side turns every unknown data

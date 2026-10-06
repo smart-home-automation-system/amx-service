@@ -60,7 +60,7 @@ class AmxConfigurationLookupTest {
 
     //for every test of the class, so not a few hundred milliseconds: the first call of a fresh
     //WebClient initialises Netty, and on a CI runner that alone must not turn an answer into a 504.
-    //Above the 2 s DownstreamErrors gives an error body, below the 5 s WebTestClient waits
+    //Above the 2 s DownstreamErrors gives an error body
     private static final Duration RESPONSE_TIMEOUT = Duration.ofSeconds(3);
 
     private final ListAppender<ILoggingEvent> processorLog = new ListAppender<>();
@@ -167,6 +167,22 @@ class AmxConfigurationLookupTest {
             .jsonPath("$.errors[0].details").value(details -> assertThat((String) details)
                 .startsWith("unreadable answer of database-service: ")
                 .doesNotContain("teleporter"));
+
+        assertThat(processorLog.list).extracting(ILoggingEvent::getLevel).containsExactly(Level.ERROR);
+    }
+
+    @Test
+    void should_answer_502_when_the_answer_is_json_but_no_configuration() {
+        //what any other application says to a path it does not know, with a 200 in front of it
+        databaseServiceAnswers(json(HttpStatus.OK, "{}"));
+
+        postDatagram()
+            .expectStatus().isEqualTo(HttpStatus.BAD_GATEWAY)
+            .expectBody()
+            .jsonPath("$.errors[0].details").isEqualTo("database-service answered without a configuration");
+
+        assertThat(processorLog.list).extracting(ILoggingEvent::getLevel).containsExactly(Level.ERROR);
+        verifyNoInteractions(temperaturePublisher);
     }
 
     @Test
@@ -179,10 +195,13 @@ class AmxConfigurationLookupTest {
             .build());
 
         postDatagram().expectStatus().isEqualTo(HttpStatus.GATEWAY_TIMEOUT);
+
+        assertThat(processorLog.list).extracting(ILoggingEvent::getLevel).containsExactly(Level.ERROR);
     }
 
     private WebTestClient.ResponseSpec postDatagram() {
-        return webTestClient.post()
+        //well above the timeout of the lookup: the 504 has to arrive as an answer, not as a test that gave up
+        return webTestClient.mutate().responseTimeout(Duration.ofSeconds(15)).build().post()
             .uri("/amx")
             .body(BodyInserters.fromValue(EatonDatagramReply.builder()
                 .gateway(EatonGatewayType.BLINDS)

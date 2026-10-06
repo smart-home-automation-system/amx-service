@@ -26,7 +26,7 @@ public class ConfigurationCallException extends RuntimeException {
         final Set<ErrorMessage> downstreamMessages
     ) {
         this.httpStatus = httpStatus;
-        this.errorMessages = errorMessages;
-        this.downstreamMessages = downstreamMessages;
+        this.errorMessages = errorMessages == null ? Set.of() : errorMessages;
+        this.downstreamMessages = downstreamMessages == null ? Set.of() : downstreamMessages;
     }
 }
