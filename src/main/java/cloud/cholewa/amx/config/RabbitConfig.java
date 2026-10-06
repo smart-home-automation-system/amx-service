@@ -5,6 +5,7 @@ import org.springframework.amqp.core.FanoutExchange;
 import org.springframework.amqp.rabbit.connection.ConnectionNameStrategy;
 import org.springframework.amqp.support.converter.JacksonJsonMessageConverter;
 import org.springframework.amqp.support.converter.MessageConverter;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -21,9 +22,14 @@ public class RabbitConfig {
         return new JacksonJsonMessageConverter();
     }
 
+    //the name the broker shows for the connection: the pod, which already says which service it
+    //is and tells the old pod from the new one during a rollout. Kubernetes sets HOSTNAME;
+    //outside the cluster there is none
     @Bean
-    ConnectionNameStrategy connectionNameStrategy() {
-        return connectionFactory -> "amx-service";
+    ConnectionNameStrategy connectionNameStrategy(
+        @Value("${HOSTNAME:amx-service-local}") final String hostname
+    ) {
+        return connectionFactory -> hostname;
     }
 
     @Bean
