@@ -47,13 +47,27 @@ the ingress → `api-gateway-service`) → `AmxController` → `AmxService`:
   `ConfigurationCallExceptionProcessor` answers with that status (4xx logged at WARN, 5xx at
   ERROR). Until HAS-150 it answered a blanket 400 and logged everything at ERROR, so an
   upstream outage looked like a malformed request.
+- **What a failing `database-service` says goes to the log, never into the answer.** Its
+  `details` are raw exception text (SQL included) and `POST /home/amx` is reachable from
+  outside. `ConfigurationCallException` therefore carries two sets: `errorMessages` (answered)
+  and `downstreamMessages` (logged only, after `- downstream:`). Only the 404 with the code
+  repeats the downstream message — a cause `database-service` chose to name.
+- **Every way the lookup can go wrong ends as a `ConfigurationCallException`**, not only the
+  failures up to the response headers: an answer without a body (a 2xx or a redirect — without
+  `switchIfEmpty` the datagram was dropped and answered 200, with no log line), a connection
+  lost in the middle of the body and a body that does not decode all become 502. The last
+  `onErrorMap` catches whatever is not a `ConfigurationCallException` yet; it puts only the
+  **type** of the failure into the details, because a decoding error quotes the body.
 - **The code is a string owned by `database-service`** (`CustomErrorDescription`, pinned there by
   `CustomErrorDescriptionTest`; sent since its 0.8.0). `UNKNOWN_DATA_POINT_CODE` repeats it —
   nothing compiles against the other repo, so a rename on that side turns every unknown data
   point into a 502 here, and so does a `database-service` older than 0.8.0. Never deploy this
   service next to one.
-- `DownstreamErrors` waits at most 2 s for an error body; `response-timeout` has to stay above
-  that, or a stalled body ends as a 504 instead of the status that was already sent.
+- `DownstreamErrors` waits at most 2 s for an error body, counted from the response headers,
+  while `response-timeout` counts from the start of the call. A stalled error body therefore
+  keeps its status only when the headers arrived at least 2 s before the timeout; later than
+  that — or with a `response-timeout` of 2 s or less — it ends as a 504. Accepted: closing it
+  would take a per-call body timeout from the library.
 - The `WebClient` is built from the **autoconfigured** `WebClient.Builder` (`AppConfig`) — an own
   builder bean would not be instrumented and every outgoing call would drop the trace.
 
@@ -77,7 +91,11 @@ the ingress → `api-gateway-service`) → `AmxController` → `AmxService`:
   for the **HTTP status the AMX controller actually gets**; a client-level assertion alone once
   passed while the response was still a 400. `AmxConfigurationLookupTest` joins the two: the
   controller, the real service and client against a `MockWebServer`, so what `database-service`
-  answers is checked against the status of the response (it points the client at the stub with
+  answers is checked against the status of the response **and the level of the log line** — the
+  alerts look at ERROR, and that level is the point of HAS-176 (a logback `ListAppender` on the
+  processor's logger, so it holds for plain and JSON logs alike). The server there lives as long
+  as the class, so it answers through a `Dispatcher` set per test, not from the queue: a
+  response one test left unread would be served to the next (it points the client at the stub with
   `@DynamicPropertySource` — the application class already registers
   `DeviceDatabaseClientConfig`, a second bean of that type breaks the context). Any short timeout belongs in the single test that
   needs it: the first call of a fresh `WebClient` initialises Netty, which on the CI runner with

@@ -8,6 +8,7 @@ import cloud.cholewa.home.model.SmartDeviceType;
 import lombok.SneakyThrows;
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;
+import mockwebserver3.SocketEffect;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -149,7 +150,44 @@ class DeviceDatabaseClientTest {
         mockWebServer.enqueue(new MockResponse.Builder()
             .code(HttpStatus.INTERNAL_SERVER_ERROR.value())
             .addHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-            .body("{\"errors\":[{\"message\":\"boom\"}]}")
+            .body("{\"errors\":[{\"message\":\"boom\",\"details\":\"bad SQL grammar\"}]}")
+            .build()
+        );
+
+        sut.getEatonConfiguration(56, EatonGatewayType.BLINDS)
+            .as(StepVerifier::create)
+            .expectErrorSatisfies(throwable -> assertThat(throwable)
+                .isInstanceOfSatisfying(ConfigurationCallException.class, exception -> {
+                    assertThat(exception.getHttpStatus()).isEqualTo(HttpStatus.BAD_GATEWAY);
+                    //what a failing database-service says is for the log, not for the answer
+                    assertThat(exception.getErrorMessages()).extracting(ErrorMessage::getDetails)
+                        .containsExactly("database-service answered 500");
+                    assertThat(exception.getDownstreamMessages()).extracting(ErrorMessage::getDetails)
+                        .containsExactly("bad SQL grammar");
+                }))
+            .verify();
+    }
+
+    @Test
+    void should_report_an_answer_without_a_configuration_as_bad_gateway() {
+        mockWebServer.enqueue(new MockResponse.Builder().code(HttpStatus.NO_CONTENT.value()).build());
+
+        sut.getEatonConfiguration(56, EatonGatewayType.BLINDS)
+            .as(StepVerifier::create)
+            .expectErrorSatisfies(throwable -> assertThat(throwable)
+                .isInstanceOfSatisfying(ConfigurationCallException.class, exception ->
+                    assertThat(exception.getHttpStatus()).isEqualTo(HttpStatus.BAD_GATEWAY)))
+            .verify();
+    }
+
+    @Test
+    void should_report_a_connection_lost_in_the_middle_of_the_answer_as_bad_gateway() {
+        //the headers arrived, so this is no WebClientRequestException any more
+        mockWebServer.enqueue(new MockResponse.Builder()
+            .code(HttpStatus.OK.value())
+            .addHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+            .body("{\"point\":56,\"type\":\"temperature sensor\",\"room\":\"entrance\"}")
+            .onResponseBody(new SocketEffect.CloseSocket())
             .build()
         );
 
@@ -158,6 +196,26 @@ class DeviceDatabaseClientTest {
             .expectErrorSatisfies(throwable -> assertThat(throwable)
                 .isInstanceOfSatisfying(ConfigurationCallException.class, exception ->
                     assertThat(exception.getHttpStatus()).isEqualTo(HttpStatus.BAD_GATEWAY)))
+            .verify();
+    }
+
+    @Test
+    void should_report_an_answer_that_does_not_decode_as_bad_gateway() {
+        mockWebServer.enqueue(new MockResponse.Builder()
+            .code(HttpStatus.OK.value())
+            .addHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+            .body("{\"point\":56,\"type\":\"teleporter\",\"room\":\"entrance\"}")
+            .build()
+        );
+
+        sut.getEatonConfiguration(56, EatonGatewayType.BLINDS)
+            .as(StepVerifier::create)
+            .expectErrorSatisfies(throwable -> assertThat(throwable)
+                .isInstanceOfSatisfying(ConfigurationCallException.class, exception -> {
+                    assertThat(exception.getHttpStatus()).isEqualTo(HttpStatus.BAD_GATEWAY);
+                    assertThat(exception.getErrorMessages()).extracting(ErrorMessage::getDetails)
+                        .allSatisfy(details -> assertThat(details).doesNotContain("teleporter"));
+                }))
             .verify();
     }
 

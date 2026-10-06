@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 
 import java.util.Collections;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 //answers with the status DeviceDatabaseClient resolved - 404 for an unknown data point, 502 for a
@@ -23,16 +24,16 @@ public class ConfigurationCallExceptionProcessor implements ExceptionProcessor {
 
         final HttpStatus status = Objects.requireNonNullElse(exception.getHttpStatus(), HttpStatus.BAD_GATEWAY);
 
-        String errorMessages = exception.getErrorMessages().stream()
-            //a message without details (e.g. {"message":"boom"}) must not render as the string "null"
-            .map(message -> Objects.requireNonNullElse(message.getDetails(), message.getMessage()))
-            .filter(Objects::nonNull)
-            .collect(Collectors.joining(", "));
+        String errorMessages = join(exception.getErrorMessages());
+        //what database-service said about a failure stays here: it is not part of the answer
+        String logged = exception.getDownstreamMessages().isEmpty()
+            ? errorMessages
+            : errorMessages + " - downstream: " + join(exception.getDownstreamMessages());
 
         if (status.is5xxServerError()) {
-            log.error("Error processing configuration call ({}): {}", status.value(), errorMessages);
+            log.error("Error processing configuration call ({}): {}", status.value(), logged);
         } else {
-            log.warn("Error processing configuration call ({}): {}", status.value(), errorMessages);
+            log.warn("Error processing configuration call ({}): {}", status.value(), logged);
         }
 
         return Errors.builder()
@@ -44,5 +45,13 @@ public class ConfigurationCallExceptionProcessor implements ExceptionProcessor {
                     .build()
             ))
             .build();
+    }
+
+    private static String join(final Set<ErrorMessage> messages) {
+        return messages.stream()
+            //a message without details (e.g. {"message":"boom"}) must not render as the string "null"
+            .map(message -> Objects.requireNonNullElse(message.getDetails(), message.getMessage()))
+            .filter(Objects::nonNull)
+            .collect(Collectors.joining(", "));
     }
 }

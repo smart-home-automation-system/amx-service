@@ -55,9 +55,13 @@ holding the AMX request until the gateway gives up.
 When the lookup fails, `POST /home/amx` answers with a status that says whose problem it is:
 `404` when `database-service` knows no device for the data point — that is, when its 404
 carries the code `NOT_FOUND_DEVICE_CONFIGURATION` — `502` when `database-service` fails or
-cannot be reached (any 5xx, any other 4xx, a 404 without that code, connection refused) and
-`504` when it does not answer within the timeout. A malformed frame stays `400`. The log line
-names the status `database-service` answered.
+cannot be reached (any 5xx, any other 4xx, a 404 without that code, connection refused, an
+answer without a configuration or one that cannot be read) and `504` when it does not answer
+within the timeout. A malformed frame stays `400`.
+
+Only the 404 of an unknown data point repeats what `database-service` said. A `502` names the
+status `database-service` answered and nothing more — the messages of a failing service are
+raw exception text, so they go to the log line and stay out of the response.
 
 A 404 without the code is a path nothing answers under (a renamed endpoint, a broken route),
 not an unknown data point: it is logged at ERROR, where the alerts look, instead of passing as
