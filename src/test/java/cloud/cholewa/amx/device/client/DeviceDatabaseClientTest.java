@@ -6,12 +6,14 @@ import cloud.cholewa.home.model.EatonGatewayType;
 import cloud.cholewa.home.model.RoomName;
 import cloud.cholewa.home.model.SmartDeviceType;
 import lombok.SneakyThrows;
-import okhttp3.mockwebserver.MockResponse;
-import okhttp3.mockwebserver.MockWebServer;
+import mockwebserver3.MockResponse;
+import mockwebserver3.MockWebServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -43,39 +45,93 @@ class DeviceDatabaseClientTest {
     @SneakyThrows
     @AfterEach
     void tearDown() {
-        mockWebServer.shutdown();
+        mockWebServer.close();
     }
 
     @Test
-    void should_return_exception__when_device_configuration_not_found() {
-        mockWebServer.enqueue(new MockResponse()
-            .setResponseCode(HttpStatus.NOT_FOUND.value())
+    void should_relay_a_404_that_names_the_unknown_data_point() {
+        mockWebServer.enqueue(new MockResponse.Builder()
+            .code(HttpStatus.NOT_FOUND.value())
             .addHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-            .setBody("""
-                {
-                  "errors": [
-                    {
-                      "message": "dummy message",
-                      "details": "dummy details"
-                    }
-                  ]
-                }
+            //what database-service really sends since 0.8.0: the status is in the response, not in the body
+            .body("""
+                {"errors":[{"message":"Device configuration not found",
+                            "details":"Device not found for point: 71 on gateway: blinds",
+                            "code":"NOT_FOUND_DEVICE_CONFIGURATION"}]}
                 """)
+            .build()
         );
 
-        sut.getEatonConfiguration(56, EatonGatewayType.BLINDS)
+        sut.getEatonConfiguration(71, EatonGatewayType.BLINDS)
             .as(StepVerifier::create)
-            .expectError(ConfigurationCallException.class)
+            .expectErrorSatisfies(throwable -> assertThat(throwable)
+                .isInstanceOfSatisfying(ConfigurationCallException.class, exception -> {
+                    assertThat(exception.getHttpStatus()).isEqualTo(HttpStatus.NOT_FOUND);
+                    assertThat(exception.getErrorMessages()).extracting(ErrorMessage::getDetails)
+                        .containsExactly(
+                            "Device not found for point: 71 on gateway: blinds",
+                            "database-service answered 404"
+                        );
+                }))
+            .verify();
+    }
+
+    //a 404 alone does not say what is missing: the data point, or the path it was asked under
+    @ParameterizedTest
+    @ValueSource(strings = {
+        //the Errors contract of a database-service before 0.8.0, or of another cause
+        "{\"errors\":[{\"message\":\"Device configuration not found\",\"details\":\"point 71\"}]}",
+        "{\"errors\":[{\"message\":\"No such member\",\"code\":\"NOT_FOUND_HOUSEHOLD_MEMBER\"}]}",
+        //Spring's own answer for a path nothing is mapped to
+        "{\"timestamp\":\"2026-10-06T10:00:00Z\",\"path\":\"/home/device/configuration/eaton\",\"status\":404,\"error\":\"Not Found\"}",
+        "<html>404 page not found</html>",
+        ""
+    })
+    void should_report_a_404_without_the_code_as_bad_gateway(final String body) {
+        mockWebServer.enqueue(new MockResponse.Builder()
+            .code(HttpStatus.NOT_FOUND.value())
+            .addHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+            .body(body)
+            .build()
+        );
+
+        sut.getEatonConfiguration(71, EatonGatewayType.BLINDS)
+            .as(StepVerifier::create)
+            .expectErrorSatisfies(throwable -> assertThat(throwable)
+                .isInstanceOfSatisfying(ConfigurationCallException.class, exception -> {
+                    assertThat(exception.getHttpStatus()).isEqualTo(HttpStatus.BAD_GATEWAY);
+                    assertThat(exception.getErrorMessages()).extracting(ErrorMessage::getDetails)
+                        .contains("database-service answered 404 without the code NOT_FOUND_DEVICE_CONFIGURATION");
+                }))
+            .verify();
+    }
+
+    @Test
+    void should_not_relay_the_code_of_another_status() {
+        //the code names the cause of a 404; under any other status it is not the answer to this lookup
+        mockWebServer.enqueue(new MockResponse.Builder()
+            .code(HttpStatus.INTERNAL_SERVER_ERROR.value())
+            .addHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+            .body("{\"errors\":[{\"message\":\"boom\",\"code\":\"NOT_FOUND_DEVICE_CONFIGURATION\"}]}")
+            .build()
+        );
+
+        sut.getEatonConfiguration(71, EatonGatewayType.BLINDS)
+            .as(StepVerifier::create)
+            .expectErrorSatisfies(throwable -> assertThat(throwable)
+                .isInstanceOfSatisfying(ConfigurationCallException.class, exception ->
+                    assertThat(exception.getHttpStatus()).isEqualTo(HttpStatus.BAD_GATEWAY)))
             .verify();
     }
 
     @Test
     void should_return_gateway_timeout__when_database_service_does_not_answer_in_time() {
-        mockWebServer.enqueue(new MockResponse()
-            .setResponseCode(HttpStatus.OK.value())
+        mockWebServer.enqueue(new MockResponse.Builder()
+            .code(HttpStatus.OK.value())
             .addHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-            .setBody("{\"point\":56,\"type\":\"temperature sensor\",\"room\":\"entrance\"}")
-            .setHeadersDelay(2, TimeUnit.SECONDS)
+            .body("{\"point\":56,\"type\":\"temperature sensor\",\"room\":\"entrance\"}")
+            .headersDelay(2, TimeUnit.SECONDS)
+            .build()
         );
 
         //a short bound only here: the first call of a fresh WebClient initialises Netty, which on a CI
@@ -89,31 +145,12 @@ class DeviceDatabaseClientTest {
     }
 
     @Test
-    void should_carry_the_downstream_4xx_status_and_details() {
-        mockWebServer.enqueue(new MockResponse()
-            .setResponseCode(HttpStatus.NOT_FOUND.value())
-            .addHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-            //what database-service really sends: the status is in the response, not in the body
-            .setBody("{\"errors\":[{\"message\":\"Device configuration not found\",\"details\":\"point 71\"}]}")
-        );
-
-        sut.getEatonConfiguration(71, EatonGatewayType.BLINDS)
-            .as(StepVerifier::create)
-            .expectErrorSatisfies(throwable -> assertThat(throwable)
-                .isInstanceOfSatisfying(ConfigurationCallException.class, exception -> {
-                    assertThat(exception.getHttpStatus()).isEqualTo(HttpStatus.NOT_FOUND);
-                    assertThat(exception.getErrorMessages()).extracting(ErrorMessage::getDetails)
-                        .containsExactly("point 71", "database-service answered 404");
-                }))
-            .verify();
-    }
-
-    @Test
     void should_report_a_downstream_5xx_as_bad_gateway() {
-        mockWebServer.enqueue(new MockResponse()
-            .setResponseCode(HttpStatus.INTERNAL_SERVER_ERROR.value())
+        mockWebServer.enqueue(new MockResponse.Builder()
+            .code(HttpStatus.INTERNAL_SERVER_ERROR.value())
             .addHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-            .setBody("{\"errors\":[{\"message\":\"boom\"}]}")
+            .body("{\"errors\":[{\"message\":\"boom\"}]}")
+            .build()
         );
 
         sut.getEatonConfiguration(56, EatonGatewayType.BLINDS)
@@ -127,10 +164,11 @@ class DeviceDatabaseClientTest {
     @Test
     void should_report_a_downstream_4xx_other_than_404_as_bad_gateway() {
         //e.g. database-service rejecting a query amx-service built - not the AMX controller's fault
-        mockWebServer.enqueue(new MockResponse()
-            .setResponseCode(HttpStatus.BAD_REQUEST.value())
+        mockWebServer.enqueue(new MockResponse.Builder()
+            .code(HttpStatus.BAD_REQUEST.value())
             .addHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-            .setBody("{\"errors\":[{\"message\":\"Unknown Eaton gateway\",\"details\":\"garden\"}]}")
+            .body("{\"errors\":[{\"message\":\"Unknown Eaton gateway\",\"details\":\"garden\"}]}")
+            .build()
         );
 
         sut.getEatonConfiguration(56, EatonGatewayType.BLINDS)
@@ -164,10 +202,11 @@ class DeviceDatabaseClientTest {
 
     @Test
     void should_keep_the_status_when_the_error_body_is_not_the_errors_contract() {
-        mockWebServer.enqueue(new MockResponse()
-            .setResponseCode(HttpStatus.SERVICE_UNAVAILABLE.value())
+        mockWebServer.enqueue(new MockResponse.Builder()
+            .code(HttpStatus.SERVICE_UNAVAILABLE.value())
             .addHeader(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_HTML_VALUE)
-            .setBody("<html>upstream unavailable</html>")
+            .body("<html>upstream unavailable</html>")
+            .build()
         );
 
         sut.getEatonConfiguration(56, EatonGatewayType.BLINDS)
@@ -183,10 +222,11 @@ class DeviceDatabaseClientTest {
 
     @Test
     void should_return_device_configuration() {
-        mockWebServer.enqueue(new MockResponse()
-            .setResponseCode(HttpStatus.OK.value())
+        mockWebServer.enqueue(new MockResponse.Builder()
+            .code(HttpStatus.OK.value())
             .addHeader("Content-Type", "application/json")
-            .setBody("{\"point\":56,\"type\":\"temperature sensor\",\"room\":\"entrance\"}")
+            .body("{\"point\":56,\"type\":\"temperature sensor\",\"room\":\"entrance\"}")
+            .build()
         );
 
         sut.getEatonConfiguration(56, EatonGatewayType.BLINDS)

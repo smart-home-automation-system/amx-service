@@ -9,7 +9,7 @@
 ---
 ![GitHub top language](https://img.shields.io/github/languages/top/smart-home-automation-system/amx-service?style=plastic)
 ![Java](https://img.shields.io/badge/java-21-yellow?style=plastic)
-![SpringBoot](https://img.shields.io/badge/SpringBoot-4.1.0-blue?style=plastic)
+![SpringBoot](https://img.shields.io/badge/SpringBoot-4.1.1-blue?style=plastic)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=smart-home-automation-system_amx-service&metric=coverage)](https://sonarcloud.io/summary/new_code?id=smart-home-automation-system_amx-service)
 [![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=smart-home-automation-system_amx-service&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=smart-home-automation-system_amx-service)
 
@@ -53,11 +53,16 @@ The lookup in `database-service` is bounded by `internal.service.database.respon
 holding the AMX request until the gateway gives up.
 
 When the lookup fails, `POST /home/amx` answers with a status that says whose problem it is:
-`404` when `database-service` knows no device for the data point, `502` when
-`database-service` fails or cannot be reached (any 5xx, any 4xx other than 404, an error body
-that is not the `Errors` contract, connection refused) and `504` when it does not answer within
-the timeout. A malformed frame stays `400`. The log line names the status `database-service`
-answered.
+`404` when `database-service` knows no device for the data point — that is, when its 404
+carries the code `NOT_FOUND_DEVICE_CONFIGURATION` — `502` when `database-service` fails or
+cannot be reached (any 5xx, any other 4xx, a 404 without that code, connection refused) and
+`504` when it does not answer within the timeout. A malformed frame stays `400`. The log line
+names the status `database-service` answered.
+
+A 404 without the code is a path nothing answers under (a renamed endpoint, a broken route),
+not an unknown data point: it is logged at ERROR, where the alerts look, instead of passing as
+a WARN about a missing device. The lookup therefore needs `database-service` 0.8.0 or later —
+against an older one every unknown data point reads as a 502.
 
 ## API
 
