@@ -24,9 +24,11 @@ the ingress → `api-gateway-service`) → `AmxController` → `AmxService`:
    `GET /home/device/configuration/eaton?point=&gateway=`) — roughly every 30 s, day and night;
 3. by the configured device type: `TEMPERATURE_SENSOR` → `TemperaturePublisher` publishes a
    `TemperatureMessage` to the fanout exchange `temperature.events` (vhost `/temperature`),
-   consumed by `heating-service` alone (queue `temperature.prod.heating`). Blinds, lights, dimmers and
-   `OTHER` are **not supported yet** and end in a `RuntimeException`, which the default
-   processor renders as 500 and logs at ERROR.
+   consumed by `heating-service` alone: `temperature.prod.heating` in the cluster, and
+   `temperature.dev.heating` — bound to the same exchange, so it gets a copy of every
+   reading — when that service runs locally. Blinds, lights, dimmers and `OTHER` are **not
+   supported yet** and end in a `RuntimeException`, which the default processor renders as
+   500 and logs at ERROR.
 
 ## The call to database-service — read before touching `DeviceDatabaseClient`
 
