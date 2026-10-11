@@ -19,7 +19,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.netty.http.client.HttpClient;
 import reactor.test.StepVerifier;
 
 import java.net.ServerSocket;
@@ -37,8 +39,9 @@ class DeviceDatabaseClientTest {
     @SneakyThrows
     @BeforeEach
     void setUp() {
+        //a port of its own for every test, never a fixed one: see newConnectionClient()
         mockWebServer = new MockWebServer();
-        mockWebServer.start(3000);
+        mockWebServer.start();
 
         sut = clientWithTimeout(Duration.ofSeconds(5));
     }
@@ -268,7 +271,7 @@ class DeviceDatabaseClientTest {
         //a port that was free a moment ago - nothing listens there, the connect is refused. 127.0.0.1, not
         //localhost: on Windows a refused connect is retried per resolved address, which takes seconds; the
         //response timeout stays far above the verify window so a slow refusal cannot turn into a 504
-        new DeviceDatabaseClient(WebClient.create(), new DeviceDatabaseClientConfig("127.0.0.1", freePort(), Duration.ofSeconds(60)))
+        new DeviceDatabaseClient(newConnectionClient(), new DeviceDatabaseClientConfig("127.0.0.1", freePort(), Duration.ofSeconds(60)))
             .getEatonConfiguration(56, EatonGatewayType.BLINDS)
             .as(StepVerifier::create)
             .expectErrorSatisfies(throwable -> assertThat(throwable)
@@ -323,10 +326,23 @@ class DeviceDatabaseClientTest {
             .verifyComplete();
     }
 
-    private static DeviceDatabaseClient clientWithTimeout(final Duration responseTimeout) {
+    private DeviceDatabaseClient clientWithTimeout(final Duration responseTimeout) {
         return new DeviceDatabaseClient(
-            WebClient.create(),
-            new DeviceDatabaseClientConfig("localhost", "3000", responseTimeout)
+            newConnectionClient(),
+            new DeviceDatabaseClientConfig(
+                "localhost", String.valueOf(mockWebServer.getPort()), responseTimeout
+            )
         );
+    }
+
+    //Every test has a server of its own, and WebClient.create() shares one connection pool, keyed by
+    //host and port, between all of them. On a fixed port a test was handed the connection the test
+    //before it had left in the pool - to a server closed in the meantime - whenever it asked before
+    //the client noticed the close, and failed as "database-service unreachable" (HAS-216). No pool,
+    //so nothing is inherited, whatever port the system hands out
+    private static WebClient newConnectionClient() {
+        return WebClient.builder()
+            .clientConnector(new ReactorClientHttpConnector(HttpClient.newConnection()))
+            .build();
     }
 }
