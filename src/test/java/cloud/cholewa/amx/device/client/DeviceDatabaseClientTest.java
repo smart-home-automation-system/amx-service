@@ -335,11 +335,12 @@ class DeviceDatabaseClientTest {
         );
     }
 
-    //Every test has a server of its own, and WebClient.create() shares one connection pool, keyed by
-    //host and port, between all of them. On a fixed port a test was handed the connection the test
-    //before it had left in the pool - to a server closed in the meantime - whenever it asked before
-    //the client noticed the close, and failed as "database-service unreachable" (HAS-216). No pool,
-    //so nothing is inherited, whatever port the system hands out
+    //Every test has a server of its own, and the clients WebClient.create() builds share one
+    //connection pool, keyed by host and port. On a fixed port a test was handed the connection the
+    //test before it had left in the pool - to a server closed in the meantime - whenever it asked
+    //before the client noticed the close. Reactor Netty does not repeat a request that ends as
+    //"prematurely closed before response", so the test failed as "database-service unreachable"
+    //(HAS-216). No pool, so nothing is inherited, whatever port the system hands out
     private static WebClient newConnectionClient() {
         return WebClient.builder()
             .clientConnector(new ReactorClientHttpConnector(HttpClient.newConnection()))
