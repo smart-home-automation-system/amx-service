@@ -108,7 +108,16 @@ the ingress → `api-gateway-service`) → `AmxController` → `AmxService`:
   `DeviceDatabaseClientConfig`, a second bean of that type breaks the context). Any short timeout belongs in the single test that
   needs it: the first call of a fresh `WebClient` initialises Netty, which on the CI runner with
   JaCoCo can take longer than a few hundred milliseconds.
-
+- **A `MockWebServer` per test never gets a fixed port, and its client no connection pool**
+  (HAS-216). The clients `WebClient.create()` builds share one pool, keyed by host and port.
+  `DeviceDatabaseClientTest` used to start each test's server on port 3000: a test could then
+  be handed the connection the test before it had left in the pool — to a server already
+  closed — and fail as "database-service unreachable", because Reactor Netty does not repeat
+  a request that ends as "prematurely closed before response". It happened rarely: once in
+  about 7900 rounds of a probe, and once in a build on `main`. The server now takes whatever
+  port the system gives and the client is built on `HttpClient.newConnection()`, so nothing
+  is inherited. A server that lives as long as its class (`AmxConfigurationLookupTest`) may
+  keep the pool, as long as no test makes it close a connection.
 - **The RabbitMQ connection is named after the pod** (HAS-106): the broker shows
   `amx-service-<pod id>`, which tells the old pod from the new one during a rollout.
   `HOSTNAME` is taken only when it starts with `spring.application.name` and a dash — outside

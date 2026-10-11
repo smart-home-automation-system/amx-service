@@ -244,6 +244,9 @@ class AmxConfigurationLookupTest {
     @TestConfiguration
     static class DatabaseServiceStub {
 
+        //pooled, which is safe only while the server lives as long as the class and no test makes
+        //it close a connection: a test that does needs a client without a pool, as in
+        //DeviceDatabaseClientTest (HAS-216)
         @Bean
         WebClient webClient() {
             return WebClient.create();
