@@ -109,11 +109,17 @@ the ingress → `api-gateway-service`) → `AmxController` → `AmxService`:
   needs it: the first call of a fresh `WebClient` initialises Netty, which on the CI runner with
   JaCoCo can take longer than a few hundred milliseconds.
 
-- **The RabbitMQ connection is named after the pod** (`RabbitConfig`, HAS-106): the broker shows
+- **The RabbitMQ connection is named after the pod** (HAS-106): the broker shows
   `amx-service-<pod id>`, which tells the old pod from the new one during a rollout.
-  `HOSTNAME` is taken only when it starts with `spring.application.name` — outside the cluster
-  it is missing, empty, a workstation or a container id, and the name is then
-  `amx-service-local`. The same convention holds in every service that talks to the broker.
+  `HOSTNAME` is taken only when it starts with `spring.application.name` and a dash — outside
+  the cluster it is missing, empty, a workstation or a container id, and the name is then
+  `amx-service-local`. **Since HAS-206 the rule is not code of this service**: the strategy is
+  the bean `cholewaPodConnectionNameStrategy` of `cholewa-commons` (≥ 1.8.0,
+  `RabbitConnectionNameAutoConfiguration`), handed by Boot to the auto-configured connection
+  factory. It backs off from any `ConnectionNameStrategy` bean declared here, so do not add
+  one; `RabbitConnectionNameTest` starts the whole context (`HOSTNAME` set by the test, no
+  connection opened) and fails when the library's strategy is not the one the factory uses or
+  the name changes.
 
 ## CI/CD
 
