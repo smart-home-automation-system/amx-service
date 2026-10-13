@@ -87,6 +87,8 @@ final class FrameServerStub implements AutoCloseable {
         }
     }
 
+    //the pause is what is played here: a server that takes its time to answer
+    @SuppressWarnings("java:S2925")
     private void serve(final Socket socket) {
         try (socket) {
             final BufferedReader reader = new BufferedReader(

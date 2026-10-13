@@ -88,9 +88,9 @@ public class FrameServerClient {
     //the commands that have no outcome yet: told at the shutdown that they are not carried out
     private final Set<Command> waiting = ConcurrentHashMap.newKeySet();
 
-    private volatile Link link;
+    private final AtomicReference<Link> link = new AtomicReference<>();
     //System.nanoTime of the last attempt to connect that failed
-    private volatile Long unreachableAt;
+    private final AtomicReference<Long> unreachableAt = new AtomicReference<>();
 
     @Autowired
     public FrameServerClient(final FrameServerProperties properties) {
@@ -140,7 +140,7 @@ public class FrameServerClient {
     }
 
     boolean hasOpenConnection() {
-        final Link current = link;
+        final Link current = link.get();
         return current != null && current.isUsable(idleLimit);
     }
 
@@ -151,7 +151,7 @@ public class FrameServerClient {
         //taken first: stopping the worker ends the command that is on its way without an outcome
         final List<Command> left = List.copyOf(waiting);
         worker.dispose();
-        final Link current = link;
+        final Link current = link.get();
         if (current != null) {
             current.close();
         }
@@ -168,7 +168,7 @@ public class FrameServerClient {
                     return skipped(command);
                 }
                 //it waited while the attempts of a command before it failed: the same answer, at once
-                final Long failedAt = unreachableAt;
+                final Long failedAt = unreachableAt.get();
                 if (failedAt != null && command.queuedAt - failedAt < 0) {
                     return Mono.<Void>error(unreachable());
                 }
@@ -192,7 +192,7 @@ public class FrameServerClient {
     }
 
     private Mono<Link> connected() {
-        final Link current = link;
+        final Link current = link.get();
         if (current != null) {
             if (current.isUsable(idleLimit)) {
                 return Mono.just(current);
@@ -205,8 +205,8 @@ public class FrameServerClient {
             .retryWhen(Retry.backoff(CONNECT_ATTEMPTS - 1L, CONNECT_BACKOFF))
             .map(Link::new)
             .doOnNext(opened -> {
-                link = opened;
-                unreachableAt = null;
+                link.set(opened);
+                unreachableAt.set(null);
                 log.info("Connected to the AMX frame server");
             })
             .onErrorMap(failure -> {
@@ -215,7 +215,7 @@ public class FrameServerClient {
                     "AMX frame server {}:{} not reached in {} attempts: {}",
                     properties.host(), properties.port(), CONNECT_ATTEMPTS, cause(failure).toString()
                 );
-                unreachableAt = System.nanoTime();
+                unreachableAt.set(System.nanoTime());
                 return unreachable();
             });
     }

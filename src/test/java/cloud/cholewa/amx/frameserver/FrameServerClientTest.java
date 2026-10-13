@@ -417,6 +417,8 @@ class FrameServerClientTest {
             });
     }
 
+    //the time the stub of the server takes before it answers
+    @SuppressWarnings("java:S2925")
     @SneakyThrows
     private static void pause(final Duration duration) {
         Thread.sleep(duration);
