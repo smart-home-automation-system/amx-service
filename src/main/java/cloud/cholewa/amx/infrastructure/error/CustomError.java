@@ -19,7 +19,16 @@ public enum CustomError implements ErrorId {
     TEMPERATURE_SENSOR_INVALID_MESSAGE_LENGTH("Invalid message length for temperature sensor must be 12"),
     TEMPERATURE_SENSOR_INVALID_DEVICE_TYPE("Invalid device type for temperature sensor"),
     SIGNAL_STRENGTH_INVALID("Invalid value for signal strength"),
-    BATTERY_LEVEL_INVALID("Invalid value of battery level");
+    BATTERY_LEVEL_INVALID("Invalid value of battery level"),
+
+    //the causes of a command that was not carried out. Their names are the codes of the answer
+    //(ErrorId.codeOf) - wire contract for a caller that branches on them, pinned by CustomErrorTest
+    NOT_FOUND_DEVICE("Device not found"),
+    AMBIGUOUS_POINT("More than one device on the point"),
+    NOT_A_DIMMER("Light is not a dimmer"),
+    FRAME_SERVER_UNAVAILABLE("AMX frame server unavailable"),
+    FRAME_SERVER_TIMEOUT("AMX frame server did not answer"),
+    FRAME_REFUSED("AMX frame server refused the frame");
 
     private final String description;
 }

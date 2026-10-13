@@ -4,6 +4,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.time.Clock;
+
 @Configuration
 public class AppConfig {
 
@@ -13,5 +15,11 @@ public class AppConfig {
     @Bean
     WebClient webClient(final WebClient.Builder webClientBuilder) {
         return webClientBuilder.build();
+    }
+
+    //the clock of the house: the time a frame was sent, and the age of the cached registry
+    @Bean
+    Clock clock() {
+        return Clock.systemDefaultZone();
     }
 }

@@ -52,6 +52,15 @@ internal:
       host: database-service
       port: 6200
 
+# the TCP server of the AMX master that writes Eaton frames to the serial gateways. The host has
+# no default here on purpose: it comes from the manifest (AMX_FRAME_SERVER_HOST), and a pod
+# without it must not start
+amx:
+  frame-server:
+    port: 20010
+    connect-timeout: 2s
+    response-timeout: 3s
+
 logbook:
   format:
     style: json
@@ -86,6 +95,11 @@ internal:
       host: localhost
       port: 6005
 
+# nothing listens there unless a stub is started: a local run cannot move a blind by accident
+amx:
+  frame-server:
+    host: localhost
+
 logbook:
   format:
     style: http
@@ -101,6 +115,12 @@ spring:
   config:
     activate:
       on-profile: test
+
+# a port nothing listens on: a context of a test never reaches the AMX master
+amx:
+  frame-server:
+    host: localhost
+    port: 1
 
 logbook:
   format:

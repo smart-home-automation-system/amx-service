@@ -8,6 +8,8 @@ Local port **6001** (management **8001**); in the deployed `home` profile **6200
 on **8200**. Docker image `magikabdul/amx-service`; the pom keeps `0.0.1-SNAPSHOT`, the released
 version comes from the git tag. Not to be confused with `amx` (the NetLinx sources of the
 controller itself, on the personal account) or with `api-gateway-service` (the HTTP edge).
+Since HAS-228 it also talks **to** the AMX: commands for Eaton blinds and lights go out as raw
+frames (below).
 
 Org-wide conventions and working rules (PR flow, branch naming `feature/HAS-<n>`, "user writes
 service code, Claude reviews", both reviews before merge, own libraries on their latest
@@ -79,6 +81,66 @@ the ingress → `api-gateway-service`) → `AmxController` → `AmxService`:
 - The `WebClient` is built from the **autoconfigured** `WebClient.Builder` (`AppConfig`) — an own
   builder bean would not be instrumented and every outgoing call would drop the trace.
 
+## Eaton commands — read before touching `FrameServerClient` or `EatonDeviceRegistry`
+
+`POST /home/amx/eaton/blinds/{point}`, `.../lights/{point}`, `.../lights/{point}/level`
+(`EatonCommandController`) → `EatonCommandService` → `EatonDeviceRegistry` (which gateway) →
+`EatonFrameBuilder` → `FrameServerClient` (the TCP server of the AMX master, NetLinx side:
+HAS-230). 202 with `sentAt` once the server said `OK`. The contract for callers is in the README.
+
+- **The frames are those of `Eaton_xComfort_Comm_nl3_0_0.axs`** (repo `amx`), quoted next to the
+  tests of `EatonFrameBuilder`. `statusRequest` (`0B`) is built and tested, and nothing calls it
+  yet.
+- **One connection, one command at a time** — the answers of the server (`OK` / `ERR <text>`)
+  carry nothing that ties them to a command, and it takes one client. `FrameServerClient` queues
+  the commands in a sink and a single subscriber carries them out (`concatMap`). Its rules, each
+  with a test:
+  - **A frame is never sent twice.** Only the connecting is repeated (3 attempts). After the
+    line is written a failure is told to the caller: "may have been carried out".
+  - **Every failure after the line was written ends the connection**, `ERR` left out — the late
+    answer would be read as the answer of the next command.
+  - **A connection idle for two minutes is replaced by the next command**, never closed by a
+    timer: a timer closed it under a command that had just found it open (review of HAS-228).
+    The reason for the limit is the stale-connection case of HAS-212.
+  - **A command whose caller gave up is not sent**, asked before the connecting and again
+    after it. Once its line is written it is finished whoever listens.
+  - **A server that cannot be reached is not tried again for the commands that waited
+    meanwhile** — otherwise each of twenty would spend three attempts on a dead master.
+  - **At the shutdown the waiting commands get an outcome**; the list is taken *before* the
+    worker is stopped, because stopping it removes the command on its way.
+- **Two things only `doFinally` taught**: it runs *after* the next command has started (the
+  completion travels downstream first), so the sink a command waits on is cleared with
+  `compareAndSet`, never set to `null` — the first version cleared the sink of the next command
+  and every second command timed out. And a context needs `@Autowired` on the public constructor,
+  the class having a second one for tests.
+- **What the client cannot know**: a connection the master dropped without a word looks open
+  until a command on it stays unanswered — that one is a 504. Accepted.
+- **The log lines of the client carry the `traceId` of the request** although they run on the
+  subscriber of the queue: `send` captures the reactor context and `carryOut` writes it back.
+- **A kept list of the registry is believed only when it says yes** (`EatonDeviceRegistry`): one
+  device on the point. Before a refusal — 404, 409, and `NOT_A_DIMMER` in the service
+  (`findAgain`) — the registry is read again, unless the list is younger than ten seconds;
+  callers at the same moment share one read. A removed or moved device is still driven the old
+  way for five minutes: that is the cache the task asked for.
+- **This service is a reader of the device registry now** (`DeviceRegistryClient`, lists of
+  `SmartDevice` by kind). A new `RoomName`, `LightKind`, `BlindsPlacement` or `SmartVendor`
+  stored on a device of the kind `blinds` or `light` before this service has the SDK that knows
+  it makes the list undecodable — every command of that kind a 502.
+- **Do not register Eaton blinds or lights before HAS-229 is deployed.** The datagram path
+  still throws for a configured `BLINDS` / `LIGHT` / `DIMMER` (500, ERROR) — and an actuator
+  answers a command with a datagram of its own.
+- **The codes are wire contract** (`CustomError`, pinned by `CustomErrorTest`): `NOT_FOUND_DEVICE`,
+  `AMBIGUOUS_POINT`, `NOT_A_DIMMER`, `FRAME_SERVER_UNAVAILABLE`, `FRAME_SERVER_TIMEOUT`,
+  `FRAME_REFUSED`. `EatonCommandException`'s message is answered as `details` — put nothing in
+  it a response must not carry (the address of the master goes to the log line only).
+- **`amx.frame-server.host` has no default in the shared document** — `AMX_FRAME_SERVER_HOST` in
+  the manifest; `local` and `test` point at `localhost` (`test`: port 1). The context tests
+  carry `@ActiveProfiles("test")` for that reason.
+- **Copies to recognise** (the rule of the organization: into `cholewa-commons` at the fourth):
+  `InvalidRequestParameterProcessor` is the second copy, after `database-service`. And
+  `DeviceRegistryClient` repeats the failure chain of `DeviceDatabaseClient` — a fix to one
+  belongs in both.
+
 ## RabbitMQ
 
 - **No own `RabbitTemplate` bean** (`RabbitConfig`): `RabbitAutoConfiguration` backs off from
@@ -94,6 +156,9 @@ the ingress → `api-gateway-service`) → `AmxController` → `AmxService`:
 - `mvn verify` (JDK 21). `tidy-maven-plugin:check` runs in `verify` — after editing the pom run
   `mvn tidy:pom`. Mockito runs as an explicit `-javaagent` with **`@{argLine}` first** so JaCoCo's
   agent from the Sonar workflow survives.
+- `FrameServerClientTest` runs against `FrameServerStub`, a plain socket server in the test
+  sources: lines in, one line out, any number of clients so the connections can be counted. A
+  short response timeout belongs to the tests of a silent server alone.
 - Tests: `DeviceDatabaseClientTest` on `MockWebServer` — assert the **status carried by the
   exception**, and `AmxControllerTest` (`@WebFluxTest` + `@Import(ExceptionHandlerConfig.class)`)
   for the **HTTP status the AMX controller actually gets**; a client-level assertion alone once
