@@ -17,6 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
 
 import java.time.Clock;
@@ -95,9 +96,71 @@ class EatonDeviceRegistryTest {
             .thenReturn(Mono.just(List.of(LIVING_ROOM_BLINDS, OFFICE_BLINDS)));
 
         sut.find(DeviceKind.BLINDS, 5).as(StepVerifier::create).expectNext(LIVING_ROOM_BLINDS).verifyComplete();
+        clock.advance(Duration.ofSeconds(10));
         sut.find(DeviceKind.BLINDS, 6).as(StepVerifier::create).expectNext(OFFICE_BLINDS).verifyComplete();
 
         verify(deviceRegistryClient, times(2)).getDevices(DeviceKind.BLINDS);
+    }
+
+    //a client that goes through points nothing is registered on is one read in ten seconds
+    @Test
+    void should_refuse_from_a_list_that_was_read_within_the_last_ten_seconds() {
+        when(deviceRegistryClient.getDevices(DeviceKind.BLINDS)).thenReturn(Mono.just(List.of(LIVING_ROOM_BLINDS)));
+
+        sut.find(DeviceKind.BLINDS, 44).as(StepVerifier::create).expectError(EatonCommandException.class).verify();
+        clock.advance(Duration.ofSeconds(9));
+        sut.find(DeviceKind.BLINDS, 45).as(StepVerifier::create).expectError(EatonCommandException.class).verify();
+        sut.findAgain(DeviceKind.BLINDS, 46).as(StepVerifier::create).expectError(EatonCommandException.class).verify();
+
+        verify(deviceRegistryClient, times(1)).getDevices(DeviceKind.BLINDS);
+    }
+
+    //the second device was removed from the registry: the point is driven again, not refused for
+    //five more minutes
+    @Test
+    void should_read_the_registry_again_before_it_calls_a_point_ambiguous() {
+        when(deviceRegistryClient.getDevices(DeviceKind.BLINDS))
+            .thenReturn(Mono.just(List.of(LIVING_ROOM_BLINDS, eaton("Garage blinds", EatonGatewayType.LIGHTS, 5))))
+            .thenReturn(Mono.just(List.of(LIVING_ROOM_BLINDS)));
+
+        sut.find(DeviceKind.BLINDS, 5).as(StepVerifier::create).expectError(EatonCommandException.class).verify();
+        clock.advance(Duration.ofSeconds(10));
+        sut.find(DeviceKind.BLINDS, 5).as(StepVerifier::create).expectNext(LIVING_ROOM_BLINDS).verifyComplete();
+    }
+
+    //for a caller about to refuse a command because of what the device is
+    @Test
+    void should_find_a_device_again_in_a_list_that_is_not_older_than_ten_seconds() {
+        final SmartDevice corrected = eaton("Living room blinds, corrected", EatonGatewayType.BLINDS, 5);
+        when(deviceRegistryClient.getDevices(DeviceKind.BLINDS))
+            .thenReturn(Mono.just(List.of(LIVING_ROOM_BLINDS)))
+            .thenReturn(Mono.just(List.of(corrected)));
+
+        sut.find(DeviceKind.BLINDS, 5).as(StepVerifier::create).expectNext(LIVING_ROOM_BLINDS).verifyComplete();
+        clock.advance(Duration.ofSeconds(10));
+        sut.findAgain(DeviceKind.BLINDS, 5).as(StepVerifier::create).expectNext(corrected).verifyComplete();
+        //and what was read is the kept list from then on
+        sut.find(DeviceKind.BLINDS, 5).as(StepVerifier::create).expectNext(corrected).verifyComplete();
+
+        verify(deviceRegistryClient, times(2)).getDevices(DeviceKind.BLINDS);
+    }
+
+    //twenty commands of a schedule at the moment the list is too old are one call to database-service
+    @Test
+    void should_share_one_read_among_the_callers_that_ask_while_it_is_under_way() {
+        final Sinks.One<List<SmartDevice>> answer = Sinks.one();
+        when(deviceRegistryClient.getDevices(DeviceKind.BLINDS)).thenReturn(answer.asMono());
+
+        final StepVerifier first = sut.find(DeviceKind.BLINDS, 5).as(StepVerifier::create)
+            .expectNext(LIVING_ROOM_BLINDS).expectComplete().verifyLater();
+        final StepVerifier second = sut.find(DeviceKind.BLINDS, 6).as(StepVerifier::create)
+            .expectNext(OFFICE_BLINDS).expectComplete().verifyLater();
+
+        answer.tryEmitValue(List.of(LIVING_ROOM_BLINDS, OFFICE_BLINDS));
+        first.verify(Duration.ofSeconds(5));
+        second.verify(Duration.ofSeconds(5));
+
+        verify(deviceRegistryClient, times(1)).getDevices(DeviceKind.BLINDS);
     }
 
     @Test

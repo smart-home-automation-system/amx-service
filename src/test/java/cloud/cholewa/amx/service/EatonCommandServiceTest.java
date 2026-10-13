@@ -100,6 +100,8 @@ class EatonCommandServiceTest {
     void should_not_send_a_level_to_a_light_that_is_not_registered_as_a_dimmer(final LightKind lightKind) {
         when(eatonDeviceRegistry.find(DeviceKind.LIGHT, 12))
             .thenReturn(Mono.just(device(DeviceKind.LIGHT, EatonGatewayType.LIGHTS, 12, lightKind)));
+        when(eatonDeviceRegistry.findAgain(DeviceKind.LIGHT, 12))
+            .thenReturn(Mono.just(device(DeviceKind.LIGHT, EatonGatewayType.LIGHTS, 12, lightKind)));
 
         sut.setLightLevel(12, 50)
             .as(StepVerifier::create)
@@ -111,6 +113,22 @@ class EatonCommandServiceTest {
             .verify();
 
         verifyNoInteractions(frameServerClient);
+    }
+
+    //the kept list still calls the light a relay; the owner made it a dimmer a moment ago
+    @Test
+    void should_read_the_device_again_before_it_refuses_a_level() {
+        when(eatonDeviceRegistry.find(DeviceKind.LIGHT, 12))
+            .thenReturn(Mono.just(device(DeviceKind.LIGHT, EatonGatewayType.LIGHTS, 12, LightKind.RELAY)));
+        when(eatonDeviceRegistry.findAgain(DeviceKind.LIGHT, 12))
+            .thenReturn(Mono.just(device(DeviceKind.LIGHT, EatonGatewayType.LIGHTS, 12, LightKind.DIMMER)));
+        when(frameServerClient.send(EatonGatewayType.LIGHTS, "5A,09,B1,0C,0C,32,00,00,00,00,A5"))
+            .thenReturn(Mono.empty());
+
+        sut.setLightLevel(12, 50)
+            .as(StepVerifier::create)
+            .expectNext(SENT_AT)
+            .verifyComplete();
     }
 
     @Test

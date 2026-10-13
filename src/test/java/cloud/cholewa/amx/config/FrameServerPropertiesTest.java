@@ -64,6 +64,8 @@ class FrameServerPropertiesTest {
         //milliseconds written where seconds are read
         "amx.frame-server.connect-timeout=2000",
         "amx.frame-server.response-timeout=3000",
+        //three attempts to connect and the wait for the answer have to end before the gateway gives up
+        "amx.frame-server.connect-timeout=6s",
         "amx.frame-server.response-timeout=11s"
     })
     void should_not_start_with_a_value_out_of_bounds(final String property) {

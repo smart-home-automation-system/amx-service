@@ -17,6 +17,7 @@ import reactor.test.StepVerifier;
 
 import java.net.ServerSocket;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -294,8 +295,60 @@ class FrameServerClientTest {
         assertThat(server.connections()).isEqualTo(2);
     }
 
+    //a master that is switched off: the commands that waited while the first one tried are told at
+    //once, instead of each spending three attempts of its own
+    @SneakyThrows
     @Test
-    void should_close_a_connection_nothing_was_sent_on_for_the_idle_limit_and_open_it_again() {
+    void should_not_try_an_unreachable_server_again_for_the_commands_that_waited() {
+        final int nobody;
+        try (ServerSocket taken = new ServerSocket(0)) {
+            nobody = taken.getLocalPort();
+        }
+        sut.shutDown();
+        sut = new FrameServerClient(
+            new FrameServerProperties("127.0.0.1", nobody, Duration.ofSeconds(2), TIMEOUT));
+
+        final long startedOne = System.nanoTime();
+        sut.send(EatonGatewayType.BLINDS, OPEN).as(StepVerifier::create).expectError().verify(PATIENCE);
+        final long one = System.nanoTime() - startedOne;
+
+        final long startedSix = System.nanoTime();
+        Flux.range(0, 6)
+            .flatMap(each -> sut.send(EatonGatewayType.BLINDS, STOP).materialize())
+            .as(StepVerifier::create)
+            .thenConsumeWhile(signal -> signal.getThrowable() instanceof EatonCommandException exception
+                && exception.getMessage().equals("the AMX frame server cannot be reached; the frame was not sent"))
+            .expectComplete()
+            .verify(PATIENCE);
+        final long six = System.nanoTime() - startedSix;
+
+        //each on its own would be six times the one
+        assertThat(six).isLessThan(3 * one + Duration.ofMillis(500).toNanos());
+    }
+
+    //the pod is stopped in a rollout: nobody is left waiting for the gateway to give up, and only
+    //the command whose line was written is told that it may have been carried out
+    @Test
+    void should_tell_the_commands_that_wait_at_the_shutdown_what_became_of_them() {
+        server.answers(line -> null);
+        final AtomicReference<Throwable> written = new AtomicReference<>();
+        final AtomicReference<Throwable> queued = new AtomicReference<>();
+
+        sut.send(EatonGatewayType.BLINDS, OPEN).subscribe(nothing -> { }, written::set);
+        await().atMost(PATIENCE).until(() -> server.lines().size() == 1);
+        sut.send(EatonGatewayType.BLINDS, STOP).subscribe(nothing -> { }, queued::set);
+
+        sut.shutDown();
+
+        await().atMost(PATIENCE).until(() -> written.get() != null && queued.get() != null);
+        assertThat(written.get()).hasMessage(
+            "the connection to the AMX frame server was lost before its answer; the frame may have been carried out");
+        assertThat(queued.get()).hasMessage("the frame server client is shut down; the frame was not sent");
+        assertThat(server.lines()).containsExactly("blinds;" + OPEN);
+    }
+
+    @Test
+    void should_not_use_a_connection_nothing_was_sent_on_for_the_idle_limit() {
         sut.shutDown();
         sut = client(TIMEOUT, Duration.ofMillis(200));
 

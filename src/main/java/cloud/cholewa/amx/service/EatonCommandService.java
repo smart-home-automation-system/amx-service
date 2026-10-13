@@ -42,16 +42,24 @@ public class EatonCommandService {
             .flatMap(device -> send(device, EatonFrameBuilder.lightSwitch(point, on)));
     }
 
-    //a level is for a light the registry calls a dimmer; a light without a light kind is not one
+    //a level is for a light the registry calls a dimmer; a light without a light kind is not one.
+    //Before the refusal the device is read again: the light kind may have been set a moment ago
     public Mono<LocalDateTime> setLightLevel(final int point, final int level) {
         return eatonDeviceRegistry.find(DeviceKind.LIGHT, point)
-            .flatMap(device -> device.getLightKind() == LightKind.DIMMER
+            .flatMap(device -> isDimmer(device)
+                ? Mono.just(device)
+                : eatonDeviceRegistry.findAgain(DeviceKind.LIGHT, point))
+            .flatMap(device -> isDimmer(device)
                 ? send(device, EatonFrameBuilder.lightLevel(point, level))
                 : Mono.error(new EatonCommandException(
                     HttpStatus.CONFLICT,
                     CustomError.NOT_A_DIMMER,
                     "The light on point: " + point + " is not registered as a dimmer"
                 )));
+    }
+
+    private static boolean isDimmer(final SmartDevice device) {
+        return device.getLightKind() == LightKind.DIMMER;
     }
 
     private Mono<LocalDateTime> send(final SmartDevice device, final String frame) {

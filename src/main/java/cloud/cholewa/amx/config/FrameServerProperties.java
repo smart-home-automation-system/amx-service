@@ -18,18 +18,19 @@ import java.time.temporal.ChronoUnit;
  * The TCP server of the AMX master that writes an Eaton frame to the serial gateways.<br>
  * {@code host} - mandatory and without a default in the document a pod runs with: a default
  * would let the pod start, turn Ready and fail every command.<br>
- * {@code connectTimeout} - how long one attempt to connect may take.<br>
+ * {@code connectTimeout} - how long one attempt to connect may take; there are up to three.<br>
  * {@code responseTimeout} - how long the server may take to answer a frame it was sent.<br>
  * A bare number is seconds: without the unit it would bind as milliseconds and every command
- * would time out. The upper bound catches a value meant as milliseconds ("3000"); together the
- * two stay well below the 30 s after which a caller behind the gateway is answered a 504.
+ * would time out. The upper bounds catch a value meant as milliseconds ("3000") and keep a
+ * command - three attempts to connect and the wait for the answer - below the 30 s after which
+ * the gateway answers its caller a 504: about 10 s with the defaults, 25 s at the bounds.
  */
 @Validated
 @ConfigurationProperties(prefix = "amx.frame-server")
 public record FrameServerProperties(
     @NotBlank String host,
     @NotNull @Min(1) @Max(65535) Integer port,
-    @NotNull @DurationMin(seconds = 1) @DurationMax(seconds = 10) @DurationUnit(ChronoUnit.SECONDS)
+    @NotNull @DurationMin(seconds = 1) @DurationMax(seconds = 5) @DurationUnit(ChronoUnit.SECONDS)
     @DefaultValue("2s") Duration connectTimeout,
     @NotNull @DurationMin(seconds = 1) @DurationMax(seconds = 10) @DurationUnit(ChronoUnit.SECONDS)
     @DefaultValue("3s") Duration responseTimeout
