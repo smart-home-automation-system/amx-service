@@ -58,7 +58,7 @@ class EatonCommandServiceTest {
     void should_send_the_blinds_frame_to_the_gateway_of_the_registry() {
         when(eatonDeviceRegistry.find(DeviceKind.BLINDS, 5))
             .thenReturn(Mono.just(device(DeviceKind.BLINDS, EatonGatewayType.BLINDS, 5, null)));
-        when(frameServerClient.send(EatonGatewayType.BLINDS, "5A,09,B1,05,0E,02,00,00,00,00,A5"))
+        when(frameServerClient.send(EatonGatewayType.BLINDS, "5A,06,B1,05,0E,02,00,A5"))
             .thenReturn(Mono.empty());
 
         sut.moveBlinds(5, BlindsCommand.STOP)
@@ -72,7 +72,7 @@ class EatonCommandServiceTest {
     void should_send_the_frame_of_a_light_to_the_gateway_it_is_registered_on() {
         when(eatonDeviceRegistry.find(DeviceKind.LIGHT, 7))
             .thenReturn(Mono.just(device(DeviceKind.LIGHT, EatonGatewayType.BLINDS, 7, LightKind.RELAY)));
-        when(frameServerClient.send(EatonGatewayType.BLINDS, "5A,09,B1,07,0A,01,00,00,00,00,A5"))
+        when(frameServerClient.send(EatonGatewayType.BLINDS, "5A,06,B1,07,0A,01,00,A5"))
             .thenReturn(Mono.empty());
 
         sut.switchLight(7, true)
@@ -85,7 +85,7 @@ class EatonCommandServiceTest {
     void should_send_the_level_to_a_dimmer() {
         when(eatonDeviceRegistry.find(DeviceKind.LIGHT, 12))
             .thenReturn(Mono.just(device(DeviceKind.LIGHT, EatonGatewayType.LIGHTS, 12, LightKind.DIMMER)));
-        when(frameServerClient.send(EatonGatewayType.LIGHTS, "5A,09,B1,0C,0C,32,00,00,00,00,A5"))
+        when(frameServerClient.send(EatonGatewayType.LIGHTS, "5A,06,B1,0C,0C,32,00,A5"))
             .thenReturn(Mono.empty());
 
         sut.setLightLevel(12, 50)
@@ -122,7 +122,7 @@ class EatonCommandServiceTest {
             .thenReturn(Mono.just(device(DeviceKind.LIGHT, EatonGatewayType.LIGHTS, 12, LightKind.RELAY)));
         when(eatonDeviceRegistry.findAgain(DeviceKind.LIGHT, 12))
             .thenReturn(Mono.just(device(DeviceKind.LIGHT, EatonGatewayType.LIGHTS, 12, LightKind.DIMMER)));
-        when(frameServerClient.send(EatonGatewayType.LIGHTS, "5A,09,B1,0C,0C,32,00,00,00,00,A5"))
+        when(frameServerClient.send(EatonGatewayType.LIGHTS, "5A,06,B1,0C,0C,32,00,A5"))
             .thenReturn(Mono.empty());
 
         sut.setLightLevel(12, 50)
@@ -152,7 +152,7 @@ class EatonCommandServiceTest {
             new EatonCommandException(HttpStatus.GATEWAY_TIMEOUT, CustomError.FRAME_SERVER_TIMEOUT, "silent");
         when(eatonDeviceRegistry.find(DeviceKind.LIGHT, 7))
             .thenReturn(Mono.just(device(DeviceKind.LIGHT, EatonGatewayType.LIGHTS, 7, LightKind.RELAY)));
-        when(frameServerClient.send(EatonGatewayType.LIGHTS, "5A,09,B1,07,0A,00,00,00,00,00,A5"))
+        when(frameServerClient.send(EatonGatewayType.LIGHTS, "5A,06,B1,07,0A,00,00,A5"))
             .thenReturn(Mono.error(silent));
 
         sut.switchLight(7, false)
@@ -160,7 +160,7 @@ class EatonCommandServiceTest {
             .expectErrorSatisfies(throwable -> assertThat(throwable).isSameAs(silent))
             .verify();
 
-        verify(frameServerClient).send(EatonGatewayType.LIGHTS, "5A,09,B1,07,0A,00,00,00,00,00,A5");
+        verify(frameServerClient).send(EatonGatewayType.LIGHTS, "5A,06,B1,07,0A,00,00,A5");
     }
 
     private static SmartDevice device(

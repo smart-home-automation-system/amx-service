@@ -12,9 +12,11 @@ import static cloud.cholewa.amx.infrastructure.error.CustomError.TEMPERATURE_SEN
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public class TemperatureParser {
 
-    private static final String TEMPERATURE_SENSOR_TYPE = "62";
-    private static final String ANALOG_SENSOR_TYPE = "3";
-    private static final String ROOM_CONTROLLER_SENSOR_TYPE = "17";
+    //the bytes are compared as numbers: the frame server writes every byte in two digits (03),
+    //the HTTP forwarder of old wrote none that were not needed (3)
+    private static final int TEMPERATURE_SENSOR_TYPE = 0x62;
+    private static final int ANALOG_SENSOR_TYPE = 0x03;
+    private static final int ROOM_CONTROLLER_SENSOR_TYPE = 0x17;
 
     /*
      * A valid message type is PayloadType.RX 12-byte length
@@ -45,14 +47,20 @@ public class TemperatureParser {
     }
 
     private static void throwExceptionWhenDeviceIsNotTemperatureSensor(final List<String> elements) {
-        if (!elements.get(3).equals(TEMPERATURE_SENSOR_TYPE)) {
+        if (byteOf(elements.get(3)) != TEMPERATURE_SENSOR_TYPE) {
             throw new EatonParsingException(TEMPERATURE_SENSOR_INVALID_DEVICE_TYPE);
         }
     }
 
     private static void throwExceptionWhenDeviceIsNotSourceOfTemperature(final List<String> elements) {
-        if (!elements.get(4).equals(ROOM_CONTROLLER_SENSOR_TYPE) && !elements.get(4).equals(ANALOG_SENSOR_TYPE)) {
+        final int dataType = byteOf(elements.get(4));
+        if (dataType != ROOM_CONTROLLER_SENSOR_TYPE && dataType != ANALOG_SENSOR_TYPE) {
             throw new EatonParsingException(TEMPERATURE_SENSOR_INVALID_DEVICE_TYPE);
         }
+    }
+
+    //the elements passed the validator: hex digits, one or two of them
+    private static int byteOf(final String element) {
+        return Integer.parseInt(element, 16);
     }
 }

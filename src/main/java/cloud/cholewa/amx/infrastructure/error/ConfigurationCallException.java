@@ -4,11 +4,12 @@ import cloud.cholewa.commons.error.model.ErrorMessage;
 import lombok.Getter;
 import org.springframework.http.HttpStatus;
 
+import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
-//errorMessages - what the caller is answered with; downstreamMessages - what database-service said
-//and only the log may repeat: the details of a failing service are raw exception text (SQL included),
-//and POST /home/amx is reachable from outside
+//errorMessages - the cause as this service names it; downstreamMessages - what database-service
+//said about a failure, raw exception text (SQL included) that belongs in the log line alone
 @Getter
 public class ConfigurationCallException extends RuntimeException {
 
@@ -28,5 +29,23 @@ public class ConfigurationCallException extends RuntimeException {
         this.httpStatus = httpStatus;
         this.errorMessages = errorMessages == null ? Set.of() : errorMessages;
         this.downstreamMessages = downstreamMessages == null ? Set.of() : downstreamMessages;
+    }
+
+    //the line of the log: the status database-service was resolved to, the cause, and after
+    //"- downstream:" what database-service itself said
+    public String describe() {
+        final String status = httpStatus == null ? "no status" : String.valueOf(httpStatus.value());
+        final String cause = join(errorMessages);
+        return downstreamMessages.isEmpty()
+            ? "lookup failed (" + status + "): " + cause
+            : "lookup failed (" + status + "): " + cause + " - downstream: " + join(downstreamMessages);
+    }
+
+    private static String join(final Set<ErrorMessage> messages) {
+        return messages.stream()
+            //a message without details (e.g. {"message":"boom"}) must not render as the string "null"
+            .map(message -> Objects.requireNonNullElse(message.getDetails(), message.getMessage()))
+            .filter(Objects::nonNull)
+            .collect(Collectors.joining(", "));
     }
 }

@@ -1,15 +1,11 @@
 package cloud.cholewa.amx.config;
 
-import cloud.cholewa.commons.error.GlobalErrorExceptionHandler;
 import cloud.cholewa.amx.infrastructure.error.ConfigurationCallException;
 import cloud.cholewa.amx.infrastructure.error.EatonCommandException;
-import cloud.cholewa.amx.infrastructure.error.EatonParsingException;
-import cloud.cholewa.amx.infrastructure.error.HeatingCallException;
 import cloud.cholewa.amx.infrastructure.error.processor.ConfigurationCallExceptionProcessor;
 import cloud.cholewa.amx.infrastructure.error.processor.EatonCommandExceptionProcessor;
-import cloud.cholewa.amx.infrastructure.error.processor.EatonParsingExceptionProcessor;
-import cloud.cholewa.amx.infrastructure.error.processor.HeatingCallExceptionProcessor;
 import cloud.cholewa.amx.infrastructure.error.processor.InvalidRequestParameterProcessor;
+import cloud.cholewa.commons.error.GlobalErrorExceptionHandler;
 import org.springframework.boot.autoconfigure.web.WebProperties;
 import org.springframework.boot.webflux.error.ErrorAttributes;
 import org.springframework.context.ApplicationContext;
@@ -21,6 +17,10 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 
 import java.util.Map;
 
+//the commands are the only requests this service answers: the frames of the gateways come
+//through the socket of the frame server and their failures are log lines of EatonFrameReceiver.
+//A failed call to database-service is still answered here - the registry a command asks which
+//gateway a point is on fails the same way the configuration lookup of a frame does
 @Configuration
 public class ExceptionHandlerConfig {
 
@@ -38,9 +38,7 @@ public class ExceptionHandlerConfig {
 
         globalErrorExceptionHandler.withCustomErrorProcessor(
             Map.ofEntries(
-                Map.entry(EatonParsingException.class, new EatonParsingExceptionProcessor()),
                 Map.entry(ConfigurationCallException.class, new ConfigurationCallExceptionProcessor()),
-                Map.entry(HeatingCallException.class, new HeatingCallExceptionProcessor()),
                 Map.entry(EatonCommandException.class, new EatonCommandExceptionProcessor()),
                 Map.entry(HandlerMethodValidationException.class, new InvalidRequestParameterProcessor())
             )

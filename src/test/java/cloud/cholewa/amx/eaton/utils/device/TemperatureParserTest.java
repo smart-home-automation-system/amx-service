@@ -67,6 +67,17 @@ class TemperatureParserTest {
                 "valid temperature over 25.5",
                 List.of("C", "C1", "36", "62", "17", "0", "01", "97", "0", "4", "44", "5"),
                 40.7
+            ),
+            //what the frame server sends: every byte in two digits, the analogue data type as 03
+            Arguments.of(
+                "two digits per byte, analogue sensor",
+                List.of("0C", "C1", "2C", "62", "03", "00", "00", "D2", "00", "00", "4E", "05"),
+                21.0
+            ),
+            Arguments.of(
+                "two digits per byte, room controller",
+                List.of("0C", "C1", "2D", "62", "17", "00", "00", "F0", "00", "00", "3A", "10"),
+                24.0
             )
         );
     }
