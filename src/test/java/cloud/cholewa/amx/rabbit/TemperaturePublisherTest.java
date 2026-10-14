@@ -10,6 +10,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import reactor.test.StepVerifier;
 
+import java.time.LocalDateTime;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
@@ -30,7 +32,7 @@ class TemperaturePublisherTest {
         double temperature = 22.5;
         RoomName room = RoomName.LIVING_ROOM;
 
-        sut.publish(temperature, room)
+        sut.publish(temperature, room, LocalDateTime.of(2026, 10, 14, 20, 15, 30))
             .as(StepVerifier::create)
             .verifyComplete();
 

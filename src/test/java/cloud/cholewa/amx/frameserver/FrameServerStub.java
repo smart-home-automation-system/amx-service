@@ -16,7 +16,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 //What the frame server of the AMX master is to the client: it reads lines and answers one line
-//each. Unlike the real one it takes any number of clients, so a test can count the connections
+//each, and it sends the frames of the gateways whenever it likes (push). Unlike the real one it
+//takes any number of clients, so a test can count the connections
 final class FrameServerStub implements AutoCloseable {
 
     //an answer that is none: the stub closes the connection instead
@@ -28,12 +29,18 @@ final class FrameServerStub implements AutoCloseable {
     private final AtomicInteger connections = new AtomicInteger();
     private final AtomicBoolean sentAhead = new AtomicBoolean();
 
-    //null leaves the line without an answer
+    //null leaves the line without an answer; the text is written as it is, so an answer may
+    //carry more than one line - a frame line in front of the OK, say
     private volatile Function<String, String> answers = line -> "OK\n";
     private volatile Duration thinking = Duration.ZERO;
 
     FrameServerStub() throws IOException {
-        serverSocket = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+        this(0);
+    }
+
+    //on a port the test chose: a server that comes up after the client
+    FrameServerStub(final int port) throws IOException {
+        serverSocket = new ServerSocket(port, 50, InetAddress.getLoopbackAddress());
         Thread.ofVirtual().start(this::accept);
     }
 
@@ -60,6 +67,18 @@ final class FrameServerStub implements AutoCloseable {
 
     void thinksFor(final Duration thinking) {
         this.thinking = thinking;
+    }
+
+    //a frame of a gateway, or whatever else the master might send unasked: to every client
+    //that is connected, as it is - the caller ends the line
+    void push(final String text) throws IOException {
+        for (final Socket socket : sockets) {
+            if (!socket.isClosed()) {
+                final OutputStream output = socket.getOutputStream();
+                output.write(text.getBytes(StandardCharsets.US_ASCII));
+                output.flush();
+            }
+        }
     }
 
     void hangUp() throws IOException {

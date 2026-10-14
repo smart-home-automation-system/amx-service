@@ -16,7 +16,12 @@ import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 
 import java.net.ServerSocket;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -25,14 +30,23 @@ import static org.awaitility.Awaitility.await;
 
 class FrameServerClientTest {
 
-    private static final String OPEN = "5A,09,B1,05,0E,01,00,00,00,00,A5";
-    private static final String STOP = "5A,09,B1,05,0E,02,00,00,00,00,A5";
-    private static final String CLOSE = "5A,09,B1,05,0E,00,00,00,00,00,A5";
+    private static final String OPEN = "5A,06,B1,05,0E,01,00,A5";
+    private static final String STOP = "5A,06,B1,05,0E,02,00,A5";
+    private static final String CLOSE = "5A,06,B1,05,0E,00,00,A5";
+
+    private static final String TEMPERATURE = "5A,0C,C1,2D,62,17,00,00,F0,00,00,3A,10,A5";
+    private static final String ACKNOWLEDGED = "5A,08,C3,1C,04,00,10,00,00,A5";
 
     //generous on purpose: the first connection of a JVM initialises Netty. The tests of a silent
     //server bring a short one of their own
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
     private static final Duration PATIENCE = Duration.ofSeconds(20);
+    //the client connects again quickly here; in the application it is a second, up to thirty
+    private static final Duration RECONNECT_MIN = Duration.ofMillis(100);
+    private static final Duration RECONNECT_MAX = Duration.ofMillis(500);
+
+    private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 14, 20, 15, 30);
+    private static final Clock CLOCK = Clock.fixed(NOW.atZone(ZoneId.systemDefault()).toInstant(), ZoneId.systemDefault());
 
     private FrameServerStub server;
     private FrameServerClient sut;
@@ -41,14 +55,22 @@ class FrameServerClientTest {
     @BeforeEach
     void setUp() {
         server = new FrameServerStub();
-        sut = client(TIMEOUT, FrameServerClient.IDLE_LIMIT);
+        sut = connectedClient(TIMEOUT);
     }
 
     @SneakyThrows
     @AfterEach
     void tearDown() {
-        sut.shutDown();
+        sut.stop();
         server.close();
+    }
+
+    //the connection is the only way to receive, so it is not left to the first command
+    @Test
+    void should_connect_at_the_start_without_a_command() {
+        assertThat(sut.isConnected()).isTrue();
+        assertThat(server.connections()).isEqualTo(1);
+        assertThat(server.lines()).isEmpty();
     }
 
     @Test
@@ -63,12 +85,12 @@ class FrameServerClientTest {
 
     @Test
     void should_name_the_lights_gateway_by_its_value() {
-        sut.send(EatonGatewayType.LIGHTS, "5A,09,B1,07,0A,01,00,00,00,00,A5")
+        sut.send(EatonGatewayType.LIGHTS, "5A,06,B1,07,0A,01,00,A5")
             .as(StepVerifier::create)
             .expectComplete()
             .verify(PATIENCE);
 
-        assertThat(server.lines()).containsExactly("lights;5A,09,B1,07,0A,01,00,00,00,00,A5");
+        assertThat(server.lines()).containsExactly("lights;5A,06,B1,07,0A,01,00,A5");
     }
 
     @ParameterizedTest
@@ -113,14 +135,14 @@ class FrameServerClientTest {
 
     @Test
     void should_report_a_refused_frame_with_the_reason_of_the_server_and_keep_the_connection() {
-        server.answers(line -> line.endsWith(OPEN) ? "ERR serial not ready\n" : "OK\n");
+        server.answers(line -> line.endsWith(OPEN) ? "ERR gateway offline\n" : "OK\n");
 
         sut.send(EatonGatewayType.BLINDS, OPEN)
             .as(StepVerifier::create)
             .expectErrorSatisfies(failure(
                 HttpStatus.BAD_GATEWAY,
                 CustomError.FRAME_REFUSED,
-                "the AMX frame server refused the frame: serial not ready"
+                "the AMX frame server refused the frame: gateway offline"
             ))
             .verify(PATIENCE);
 
@@ -161,8 +183,8 @@ class FrameServerClientTest {
 
     @Test
     void should_answer_a_gateway_timeout_when_the_server_stays_silent() {
-        sut.shutDown();
-        sut = client(Duration.ofMillis(300), FrameServerClient.IDLE_LIMIT);
+        sut.stop();
+        sut = connectedClient(Duration.ofMillis(300));
         server.answers(line -> null);
 
         sut.send(EatonGatewayType.BLINDS, OPEN)
@@ -176,11 +198,14 @@ class FrameServerClientTest {
     }
 
     //the answer to a command that was given up arrives while the next one waits for its own: on the
-    //same connection the refusal of the first would be told to the caller of the second
+    //same connection the refusal of the first would be told to the caller of the second. The
+    //connection is dropped, and the loop opens another
     @Test
     void should_not_take_a_late_answer_for_the_answer_of_the_next_command() {
-        sut.shutDown();
-        sut = client(Duration.ofMillis(300), FrameServerClient.IDLE_LIMIT);
+        sut.stop();
+        sut = connectedClient(Duration.ofMillis(300));
+        //the client of setUp and this one
+        final int before = server.connections();
         server.answers(line -> {
             if (line.endsWith(OPEN)) {
                 pause(Duration.ofMillis(600));
@@ -197,46 +222,105 @@ class FrameServerClientTest {
                     assertThat(exception.getError()).isEqualTo(CustomError.FRAME_SERVER_TIMEOUT)))
             .verify(PATIENCE);
 
+        await().atMost(PATIENCE).until(() -> server.connections() == before + 1 && sut.isConnected());
+
         sut.send(EatonGatewayType.BLINDS, STOP)
             .as(StepVerifier::create)
             .expectComplete()
             .verify(PATIENCE);
 
-        assertThat(server.connections()).isEqualTo(2);
+        assertThat(server.connections()).isEqualTo(before + 1);
     }
 
+    //a frame of a gateway may arrive at any moment, also between a command and its answer
     @Test
-    void should_drop_the_connection_after_an_answer_that_is_neither_ok_nor_err() {
-        server.answers(line -> line.endsWith(OPEN) ? "HTTP/1.1 400 Bad Request\n" : "OK\n");
+    void should_not_take_a_frame_line_for_the_answer_of_a_command() {
+        final List<ReceivedFrame> frames = new CopyOnWriteArrayList<>();
+        sut.frames().subscribe(frames::add);
+        server.answers(line -> "lights;" + ACKNOWLEDGED + "\nblinds;" + TEMPERATURE + "\nOK\n");
+
+        sut.send(EatonGatewayType.LIGHTS, "5A,06,B1,07,0A,01,00,A5")
+            .as(StepVerifier::create)
+            .expectComplete()
+            .verify(PATIENCE);
+
+        await().atMost(PATIENCE).until(() -> frames.size() == 2);
+        assertThat(frames).containsExactly(
+            new ReceivedFrame(EatonGatewayType.LIGHTS, ACKNOWLEDGED, NOW),
+            new ReceivedFrame(EatonGatewayType.BLINDS, TEMPERATURE, NOW)
+        );
+        assertThat(server.connections()).isEqualTo(1);
+    }
+
+    @SneakyThrows
+    @Test
+    void should_hand_over_the_frames_of_the_server_in_the_order_they_came() {
+        final List<ReceivedFrame> frames = new CopyOnWriteArrayList<>();
+        sut.frames().subscribe(frames::add);
+
+        server.push("blinds;" + TEMPERATURE + "\n");
+        server.push("lights;" + ACKNOWLEDGED + "\r\n");
+        server.push("blinds;5A,0C,C1,2E,62,17,00,00,E2,00,00,41,10,A5\n");
+
+        await().atMost(PATIENCE).until(() -> frames.size() == 3);
+        assertThat(frames).containsExactly(
+            new ReceivedFrame(EatonGatewayType.BLINDS, TEMPERATURE, NOW),
+            new ReceivedFrame(EatonGatewayType.LIGHTS, ACKNOWLEDGED, NOW),
+            new ReceivedFrame(EatonGatewayType.BLINDS, "5A,0C,C1,2E,62,17,00,00,E2,00,00,41,10,A5", NOW)
+        );
+    }
+
+    //the frames come whether a command was ever sent or not, as long as the client runs
+    @SneakyThrows
+    @Test
+    void should_receive_frames_on_a_connection_nothing_was_sent_on() {
+        final List<ReceivedFrame> frames = new CopyOnWriteArrayList<>();
+        sut.frames().subscribe(frames::add);
+        pause(Duration.ofMillis(500));
+
+        server.push("blinds;" + TEMPERATURE + "\n");
+
+        await().atMost(PATIENCE).until(() -> frames.size() == 1);
+        assertThat(server.connections()).isEqualTo(1);
+        assertThat(sut.isConnected()).isTrue();
+    }
+
+    //an empty line, an answer nobody waits for and a line that is neither a frame nor an answer:
+    //logged and ignored, the connection kept, the next command and the next frame served
+    @SneakyThrows
+    @ParameterizedTest
+    @ValueSource(strings = {"\n", "\r\n", "OK\n", "ERR nobody asked\n", "HTTP/1.1 400 Bad Request\n", "ERROR\n", "kitchen;5A,A5\n"})
+    void should_ignore_a_line_that_is_not_for_anyone(final String line) {
+        final List<ReceivedFrame> frames = new CopyOnWriteArrayList<>();
+        sut.frames().subscribe(frames::add);
+
+        server.push(line);
+        pause(Duration.ofMillis(200));
 
         sut.send(EatonGatewayType.BLINDS, OPEN)
             .as(StepVerifier::create)
-            .expectErrorSatisfies(failure(
-                HttpStatus.BAD_GATEWAY,
-                CustomError.FRAME_SERVER_UNAVAILABLE,
-                "the AMX frame server gave an answer that is neither OK nor ERR;"
-                    + " the frame may have been carried out"
-            ))
-            .verify(PATIENCE);
-
-        sut.send(EatonGatewayType.BLINDS, STOP)
-            .as(StepVerifier::create)
             .expectComplete()
             .verify(PATIENCE);
+        server.push("blinds;" + TEMPERATURE + "\n");
 
-        assertThat(server.connections()).isEqualTo(2);
+        await().atMost(PATIENCE).until(() -> frames.size() == 1);
+        assertThat(frames).containsExactly(new ReceivedFrame(EatonGatewayType.BLINDS, TEMPERATURE, NOW));
+        assertThat(server.connections()).isEqualTo(1);
     }
 
-    //ERROR is not ERR: a word that only starts like a refusal is not read as one
+    //a line that is not an answer is never taken for one, whatever it looks like: the command waits
+    //for its answer and, without one, times out
     @Test
     void should_not_read_a_word_that_starts_with_err_as_a_refusal() {
+        sut.stop();
+        sut = connectedClient(Duration.ofMillis(300));
         server.answers(line -> "ERROR\n");
 
         sut.send(EatonGatewayType.BLINDS, OPEN)
             .as(StepVerifier::create)
             .expectErrorSatisfies(throwable -> assertThat(throwable)
                 .isInstanceOfSatisfying(EatonCommandException.class, exception ->
-                    assertThat(exception.getError()).isEqualTo(CustomError.FRAME_SERVER_UNAVAILABLE)))
+                    assertThat(exception.getError()).isEqualTo(CustomError.FRAME_SERVER_TIMEOUT)))
             .verify(PATIENCE);
     }
 
@@ -255,81 +339,85 @@ class FrameServerClientTest {
             .verify(PATIENCE);
     }
 
+    //a master that is switched off: every command is told at once, the connecting goes on behind
     @SneakyThrows
     @Test
-    void should_answer_a_bad_gateway_when_nothing_listens() {
+    void should_refuse_commands_at_once_while_not_connected() {
         final int nobody;
         try (ServerSocket taken = new ServerSocket(0)) {
             nobody = taken.getLocalPort();
         }
-        sut.shutDown();
+        sut.stop();
         sut = new FrameServerClient(
-            new FrameServerProperties("127.0.0.1", nobody, Duration.ofSeconds(2), TIMEOUT));
+            new FrameServerProperties("127.0.0.1", nobody, Duration.ofSeconds(2), TIMEOUT), CLOCK, RECONNECT_MIN, RECONNECT_MAX, FrameServerClient.READ_IDLE_LIMIT);
+        sut.start();
 
-        sut.send(EatonGatewayType.BLINDS, OPEN)
+        final long started = System.nanoTime();
+        Flux.range(0, 6)
+            .flatMap(each -> sut.send(EatonGatewayType.BLINDS, STOP).materialize())
             .as(StepVerifier::create)
-            .expectErrorSatisfies(failure(
-                HttpStatus.BAD_GATEWAY,
-                CustomError.FRAME_SERVER_UNAVAILABLE,
-                "the AMX frame server cannot be reached; the frame was not sent"
-            ))
+            .thenConsumeWhile(signal -> signal.getThrowable() instanceof EatonCommandException exception
+                && exception.getHttpStatus() == HttpStatus.BAD_GATEWAY
+                && exception.getError() == CustomError.FRAME_SERVER_UNAVAILABLE
+                && exception.getMessage().equals("the AMX frame server is not connected; the frame was not sent"))
+            .expectComplete()
             .verify(PATIENCE);
+
+        assertThat(System.nanoTime() - started).isLessThan(Duration.ofSeconds(1).toNanos());
+        assertThat(sut.isConnected()).isFalse();
     }
 
     @SneakyThrows
     @Test
     void should_connect_again_after_the_server_closed_the_connection() {
-        sut.send(EatonGatewayType.BLINDS, OPEN)
-            .as(StepVerifier::create)
-            .expectComplete()
-            .verify(PATIENCE);
+        final List<ReceivedFrame> frames = new CopyOnWriteArrayList<>();
+        sut.frames().subscribe(frames::add);
 
         server.hangUp();
-        await().atMost(PATIENCE).until(() -> !sut.hasOpenConnection());
+        await().atMost(PATIENCE).until(() -> server.connections() == 2 && sut.isConnected());
 
         sut.send(EatonGatewayType.BLINDS, STOP)
             .as(StepVerifier::create)
             .expectComplete()
             .verify(PATIENCE);
+        server.push("blinds;" + TEMPERATURE + "\n");
 
-        assertThat(server.connections()).isEqualTo(2);
+        await().atMost(PATIENCE).until(() -> frames.size() == 1);
+        assertThat(server.lines()).containsExactly("blinds;" + STOP);
     }
 
-    //a master that is switched off: the commands that waited while the first one tried are told at
-    //once, instead of each spending three attempts of its own
+    //the master is restarted, or the pod comes up before it: the attempts go on until one succeeds
     @SneakyThrows
     @Test
-    void should_not_try_an_unreachable_server_again_for_the_commands_that_waited() {
-        final int nobody;
+    void should_keep_trying_until_the_server_is_there() {
+        final int port;
         try (ServerSocket taken = new ServerSocket(0)) {
-            nobody = taken.getLocalPort();
+            port = taken.getLocalPort();
         }
-        sut.shutDown();
+        sut.stop();
         sut = new FrameServerClient(
-            new FrameServerProperties("127.0.0.1", nobody, Duration.ofSeconds(2), TIMEOUT));
+            new FrameServerProperties("127.0.0.1", port, Duration.ofSeconds(2), TIMEOUT), CLOCK, RECONNECT_MIN, RECONNECT_MAX, FrameServerClient.READ_IDLE_LIMIT);
+        sut.start();
+        pause(Duration.ofMillis(700));
+        assertThat(sut.isConnected()).isFalse();
 
-        final long startedOne = System.nanoTime();
-        sut.send(EatonGatewayType.BLINDS, OPEN).as(StepVerifier::create).expectError().verify(PATIENCE);
-        final long one = System.nanoTime() - startedOne;
+        try (FrameServerStub late = new FrameServerStub(port)) {
+            await().atMost(PATIENCE).until(sut::isConnected);
 
-        final long startedSix = System.nanoTime();
-        Flux.range(0, 6)
-            .flatMap(each -> sut.send(EatonGatewayType.BLINDS, STOP).materialize())
-            .as(StepVerifier::create)
-            .thenConsumeWhile(signal -> signal.getThrowable() instanceof EatonCommandException exception
-                && exception.getMessage().equals("the AMX frame server cannot be reached; the frame was not sent"))
-            .expectComplete()
-            .verify(PATIENCE);
-        final long six = System.nanoTime() - startedSix;
+            sut.send(EatonGatewayType.BLINDS, OPEN)
+                .as(StepVerifier::create)
+                .expectComplete()
+                .verify(PATIENCE);
 
-        //each on its own would be six times the one
-        assertThat(six).isLessThan(3 * one + Duration.ofMillis(500).toNanos());
+            assertThat(late.lines()).containsExactly("blinds;" + OPEN);
+            assertThat(late.connections()).isEqualTo(1);
+        }
     }
 
     //the pod is stopped in a rollout: nobody is left waiting for the gateway to give up, and only
     //the command whose line was written is told that it may have been carried out
     @Test
-    void should_tell_the_commands_that_wait_at_the_shutdown_what_became_of_them() {
+    void should_tell_the_commands_that_wait_at_the_stop_what_became_of_them() {
         server.answers(line -> null);
         final AtomicReference<Throwable> written = new AtomicReference<>();
         final AtomicReference<Throwable> queued = new AtomicReference<>();
@@ -338,7 +426,7 @@ class FrameServerClientTest {
         await().atMost(PATIENCE).until(() -> server.lines().size() == 1);
         sut.send(EatonGatewayType.BLINDS, STOP).subscribe(nothing -> { }, queued::set);
 
-        sut.shutDown();
+        sut.stop();
 
         await().atMost(PATIENCE).until(() -> written.get() != null && queued.get() != null);
         assertThat(written.get()).hasMessage(
@@ -347,25 +435,18 @@ class FrameServerClientTest {
         assertThat(server.lines()).containsExactly("blinds;" + OPEN);
     }
 
+    //the receiver ends with the client, not with an error - and the master is not connected to again
     @Test
-    void should_not_use_a_connection_nothing_was_sent_on_for_the_idle_limit() {
-        sut.shutDown();
-        sut = client(TIMEOUT, Duration.ofMillis(200));
+    void should_end_the_frames_and_the_connection_at_the_stop() {
+        final StepVerifier frames = sut.frames().as(StepVerifier::create).expectComplete().verifyLater();
 
-        sut.send(EatonGatewayType.BLINDS, OPEN)
-            .as(StepVerifier::create)
-            .expectComplete()
-            .verify(PATIENCE);
+        sut.stop();
 
-        await().atMost(PATIENCE).until(() -> !sut.hasOpenConnection());
-
-        sut.send(EatonGatewayType.BLINDS, STOP)
-            .as(StepVerifier::create)
-            .expectComplete()
-            .verify(PATIENCE);
-
-        assertThat(server.lines()).containsExactly("blinds;" + OPEN, "blinds;" + STOP);
-        assertThat(server.connections()).isEqualTo(2);
+        frames.verify(PATIENCE);
+        assertThat(sut.isConnected()).isFalse();
+        assertThat(sut.isRunning()).isFalse();
+        pause(Duration.ofMillis(400));
+        assertThat(server.connections()).isEqualTo(1);
     }
 
     //a caller that gave up - the gateway after its own timeout - must not move a blind later
@@ -388,8 +469,8 @@ class FrameServerClientTest {
     }
 
     @Test
-    void should_refuse_a_command_after_the_shutdown() {
-        sut.shutDown();
+    void should_refuse_a_command_after_the_stop() {
+        sut.stop();
 
         sut.send(EatonGatewayType.BLINDS, OPEN)
             .as(StepVerifier::create)
@@ -401,11 +482,58 @@ class FrameServerClientTest {
         assertThat(server.lines()).isEmpty();
     }
 
-    private FrameServerClient client(final Duration responseTimeout, final Duration idleLimit) {
-        return new FrameServerClient(
+    //the master power-cycled, the address translation on the way forgotten: no FIN ever comes,
+    //and a connection nothing arrives on is the only sign. Closed and opened again by itself
+    @SneakyThrows
+    @Test
+    void should_open_the_connection_again_when_nothing_arrives_for_the_idle_limit() {
+        sut.stop();
+        sut = connectedClient(TIMEOUT, Duration.ofMillis(500));
+        final int before = server.connections();
+        final List<ReceivedFrame> frames = new CopyOnWriteArrayList<>();
+        sut.frames().subscribe(frames::add);
+
+        await().atMost(PATIENCE).until(() -> server.connections() == before + 1 && sut.isConnected());
+
+        server.push("blinds;" + TEMPERATURE + "\n");
+        await().atMost(PATIENCE).until(() -> frames.size() == 1);
+        assertThat(server.lines()).isEmpty();
+    }
+
+    //a frame now and then keeps the connection: the limit is on silence, not on age
+    @SneakyThrows
+    @Test
+    void should_keep_a_connection_frames_arrive_on() {
+        sut.stop();
+        sut = connectedClient(TIMEOUT, Duration.ofMillis(500));
+        final int before = server.connections();
+        final List<ReceivedFrame> frames = new CopyOnWriteArrayList<>();
+        sut.frames().subscribe(frames::add);
+
+        for (int i = 0; i < 4; i++) {
+            pause(Duration.ofMillis(250));
+            server.push("blinds;" + TEMPERATURE + "\n");
+        }
+
+        await().atMost(PATIENCE).until(() -> frames.size() == 4);
+        assertThat(server.connections()).isEqualTo(before);
+    }
+
+    private FrameServerClient connectedClient(final Duration responseTimeout) {
+        return connectedClient(responseTimeout, FrameServerClient.READ_IDLE_LIMIT);
+    }
+
+    private FrameServerClient connectedClient(final Duration responseTimeout, final Duration readIdleLimit) {
+        final FrameServerClient client = new FrameServerClient(
             new FrameServerProperties("127.0.0.1", server.port(), Duration.ofSeconds(2), responseTimeout),
-            idleLimit
+            CLOCK,
+            RECONNECT_MIN,
+            RECONNECT_MAX,
+            readIdleLimit
         );
+        client.start();
+        await().atMost(PATIENCE).until(client::isConnected);
+        return client;
     }
 
     private static Consumer<Throwable> failure(final HttpStatus status, final CustomError error, final String details) {
@@ -417,7 +545,7 @@ class FrameServerClientTest {
             });
     }
 
-    //the time the stub of the server takes before it answers
+    //the time the stub of the server takes before it answers, or a test waits for nothing to happen
     @SuppressWarnings("java:S2925")
     @SneakyThrows
     private static void pause(final Duration duration) {

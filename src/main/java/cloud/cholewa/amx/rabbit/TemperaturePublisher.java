@@ -10,7 +10,6 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 
 @Slf4j
 @Service
@@ -19,14 +18,16 @@ public class TemperaturePublisher {
 
     private final RabbitTemplate rabbitTemplate;
 
-    public Mono<Void> publish(final double temperature, final RoomName room) {
+    //the date of the message is the time the frame arrived, not the time of the publishing: a
+    //reading that waited behind a lookup that failed for a while is published as the old news it is
+    public Mono<Void> publish(final double temperature, final RoomName room, final LocalDateTime receivedAt) {
         return Mono.fromRunnable(() -> {
                 log.debug("Publishing temperature: {} for room: {}", temperature, room);
                 rabbitTemplate.convertAndSend(
                     "temperature.events",
                     "",
                     TemperatureMessage.builder()
-                        .date(LocalDateTime.now(ZoneId.systemDefault()))
+                        .date(receivedAt)
                         .room(room)
                         .temperature(temperature)
                         .build()
