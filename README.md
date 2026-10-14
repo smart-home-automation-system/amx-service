@@ -26,15 +26,21 @@
 
 The general purpose of this service is two-way communication with an AMX control system and its connected devices.
 
-The AMX/NetLinx controller forwards every datagram it receives from the Eaton wireless gateways
-(blinds, lights, sensors) to this service. The service validates the frame, parses it into a
-domain message, asks `database-service` which device the data point belongs to, and publishes the
-result on RabbitMQ for the services that act on it — today the room temperatures consumed by
-`heating-service`.
+The AMX master runs a **frame server** (a TCP server in NetLinx, port 20010) that moves bytes
+between this service and the two Eaton wireless gateways of the house, both ways, over one
+permanent connection. This service is its only client:
 
-The other direction exists too: a command for an Eaton blinds or light actuator is turned into
-the raw frame of the gateway and handed to the **frame server** of the AMX master, a TCP server
-in NetLinx that writes it to the serial gateway (see [Eaton commands](#eaton-commands)).
+- **In**: every frame a gateway receives (a room sensor reporting, a button pressed, an
+  actuator telling its state) arrives as one line. The service validates it, asks
+  `database-service` which device the data point belongs to, and publishes the result on
+  RabbitMQ for the services that act on it — today the room temperatures consumed by
+  `heating-service`.
+- **Out**: a command for an Eaton blinds or light actuator is turned into the raw frame of the
+  gateway and sent as one line; the master writes it to the serial gateway (see
+  [Eaton commands](#eaton-commands)).
+
+The line protocol of the socket is pinned next to the NetLinx module, in the `CLAUDE.md` of the
+`amx` repository; what this side does with it is in [The frame server](#the-frame-server).
 
 ## Run locally
 
@@ -50,45 +56,34 @@ mvn spring-boot:run -Dspring-boot.run.profiles=home,local
 
 The `local` profile expects `database-service` on `localhost:6005` and RabbitMQ on
 `localhost:5672`; the Actuator exposes `health`, `info` and `prometheus`. It looks for the frame
-server on `localhost:20010`, where nothing listens unless a stub is started — a local run cannot
-move a blind by accident.
+server on `localhost:20010`, where nothing listens unless a stand-in is started — a local run
+receives nothing and cannot move a blind by accident; the client keeps trying, with a backoff.
 
 | Property | Default | |
 |---|---|---|
 | `amx.frame-server.host` | none — **mandatory** | the AMX master; in the cluster from `AMX_FRAME_SERVER_HOST` of the manifest, and a pod without it does not start |
 | `amx.frame-server.port` | `20010` | |
-| `amx.frame-server.connect-timeout` | `2s` | one attempt to connect, of up to three; 1 to 5 s, a bare number is seconds |
-| `amx.frame-server.response-timeout` | `3s` | the wait for the answer to a frame; 1 to 10 s, a bare number is seconds |
+| `amx.frame-server.connect-timeout` | `2s` | one attempt to connect; the attempts go on, 1 s to 30 s apart, until one succeeds. 1 to 5 s, a bare number is seconds |
+| `amx.frame-server.response-timeout` | `3s` | the wait for the answer to a frame that was sent; 1 to 10 s, a bare number is seconds |
 
 The lookup in `database-service` is bounded by `internal.service.database.response-timeout`
-(default `PT5S`, well below the gateway's 30 s); a lookup that runs out logs
-`Error processing configuration call: database-service did not answer within …` instead of
-holding the AMX request until the gateway gives up.
+(default `PT5S`).
 
-When the lookup fails, `POST /home/amx` answers with a status that says whose problem it is:
-`404` when `database-service` knows no device for the data point — that is, when its 404
-carries the code `NOT_FOUND_DEVICE_CONFIGURATION` — `502` when `database-service` fails or
-cannot be reached (any 5xx, any other 4xx, a 404 without that code, connection refused, an
-answer without a configuration or one that cannot be read) and `504` when it does not answer
-within the timeout. A malformed frame stays `400`.
+### Health
 
-Only the 404 of an unknown data point repeats what `database-service` said. A `502` names the
-status `database-service` answered and nothing more — the messages of a failing service are
-raw exception text, so they go to the log line and stay out of the response.
-
-A 404 without the code is a path nothing answers under (a renamed endpoint, a broken route),
-not an unknown data point: it is logged at ERROR, where the alerts look, instead of passing as
-a WARN about a missing device. The lookup therefore needs `database-service` 0.8.0 or later —
-against an older one every unknown data point reads as a 502.
+`/actuator/health` carries `frameServer`: `UP` while the socket to the master is open, `DOWN`
+with `connected: false` while it is not. It is **not** part of the readiness or the liveness
+group — a master that is switched off must neither take the pod out of the Service nor restart
+it in a loop; the client connects again by itself.
 
 ## API
 
 Base path `/home` (`spring.webflux.base-path`); in the cluster the ingress routes
-`/home/amx` to the service.
+`/home/amx` to the service. The frames of the gateways do not come through HTTP any more
+(until 1.4.0 the master posted them to `POST /home/amx`): they arrive through the socket.
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/home/amx` | Consume an Eaton datagram (`EatonDatagramReply`: gateway + raw frame) forwarded by the AMX controller; returns 200 once the frame has been parsed and published |
 | POST | `/home/amx/eaton/blinds/{point}?command=open\|close\|stop` | Move the Eaton blinds on a data point |
 | POST | `/home/amx/eaton/lights/{point}?turn=on\|off` | Switch the Eaton light on a data point |
 | POST | `/home/amx/eaton/lights/{point}/level?value=0..100` | Set the level, in percent, of the Eaton dimmer on a data point |
@@ -98,7 +93,7 @@ Base path `/home` (`spring.webflux.base-path`); in the cluster the ingress route
 The three writes answer **202** with `{"sentAt": "2026-10-13T20:06:44"}` — the local time of the
 house at which the frame server took the frame. 202 and not 200: the answer says the frame was
 handed to the gateway, never that the device did what it was told. What the device did is told
-by its own datagram.
+by its own frame, which arrives like every other one.
 
 What a caller has to know:
 
@@ -114,12 +109,12 @@ What a caller has to know:
   seconds); a device that was removed, or moved to the other gateway, is driven the old way for
   up to five minutes.
 - **`enabled` is not looked at.** This service carries what the caller decided.
-- **The commands go to the master one after the other**, in the order they came. Up to about
-  10 s for one that fails with the defaults (three attempts to connect and the wait for the
-  answer); a command that waits behind others waits for them too.
-- **A frame is never sent twice.** Only the connecting is repeated. When the answer of the server
-  does not come, the caller is told and decides — the `details` say whether the frame *was not
-  sent* or *may have been carried out*.
+- **The commands go to the master one after the other**, in the order they came; a command that
+  waits behind others waits for them too. A command while the socket is not open is refused at
+  once — the frame was not sent.
+- **A frame is never sent twice.** When the answer of the server does not come, the caller is
+  told and decides — the `details` say whether the frame *was not sent* or *may have been
+  carried out*.
 - **A caller that gives up is not served later**: a command whose request was cancelled before
   its line was written is dropped.
 - They are reachable from outside through the gateway (`/amx/**`), unauthenticated like the rest.
@@ -132,28 +127,65 @@ Failures come in the error contract of `cholewa-commons`, with a `code` to branc
 | 404 | `NOT_FOUND_DEVICE` | no Eaton device of the kind is registered on the point |
 | 409 | `AMBIGUOUS_POINT` | a device of the kind is registered on that point of both gateways |
 | 409 | `NOT_A_DIMMER` | a level for a light the registry does not call a dimmer |
-| 502 | `FRAME_SERVER_UNAVAILABLE` | the frame server was not reached (the frame was not sent), the connection was lost before its answer, or it answered something that is neither `OK` nor `ERR` |
+| 502 | `FRAME_SERVER_UNAVAILABLE` | the socket to the frame server is not open (the frame was not sent), or the connection was lost before its answer |
 | 502 | `FRAME_REFUSED` | the frame server answered `ERR`; its reason is in `details` |
-| 504 | `FRAME_SERVER_TIMEOUT` | the frame server did not answer within `response-timeout` |
-| 502 / 504 | — | the registry of `database-service` failed or did not answer, as for a datagram |
+| 504 | `FRAME_SERVER_TIMEOUT` | the frame server did not answer within `response-timeout`; the frame may have been carried out |
+| 502 / 504 | — | the registry of `database-service` failed or did not answer |
 
 The 5xx are logged at ERROR, the 4xx at WARN.
 
 ### The frame server
 
-A TCP server on the AMX master (NetLinx module `Eaton_FrameServer`, port 20010). A command is
-one line, `<gateway>;<frame>` ended by LF — `blinds;5A,09,B1,05,0E,01,00,00,00,00,A5` — and the
-server answers one line, `OK` or `ERR <reason>`. It has to send that one line and nothing else:
-the answers carry nothing that ties them to a command, so a greeting or a second line would be
-read as the answer of a command.
+A TCP server on the AMX master (the NetLinx module `Gateway_SpringBoot_REST_nl3_0_0` on the
+Television master, port 20010). Text, one message per line, ended by LF, the same shape in both
+directions: a **frame line** is `<gateway>;<frame>` — `blinds` or `lights`, then the whole serial
+frame from `5A` to `A5`, every byte as two hex digits, comma-separated.
+
+- **From the master**: every frame either gateway received, the moment it is complete, in the
+  order received — nothing is filtered or parsed on the master.
+- **To the master**: a frame line is a command; the master writes the bytes to that gateway and
+  answers exactly one line, `OK` (the gateway got the bytes — not that the RF telegram was sent;
+  the gateway's own acknowledgement arrives as a frame line) or `ERR <reason>`.
+- A frame line may arrive at any moment, also between a command and its answer. A line that is
+  neither a frame nor `OK` / `ERR` is logged and ignored — never taken for an answer.
+
+The client connects when the application starts and connects again, with a backoff, whenever
+the connection ends: it is the only way to receive. A connection nothing arrives on for five
+minutes is taken for dead and opened again — a master that was power-cycled sends no FIN. The
+frames this service sends are the TX packet of the gateway's protocol as documented (length
+`06`):
 
 | Command | Frame |
 |---|---|
-| blinds open / close / stop | `5A,09,B1,<point>,0E,<01 \| 00 \| 02>,00,00,00,00,A5` |
-| light on / off | `5A,09,B1,<point>,0A,<01 \| 00>,00,00,00,00,A5` |
-| dimmer level | `5A,09,B1,<point>,0C,<00–64>,00,00,00,00,A5` |
+| blinds open / close / stop | `5A,06,B1,<point>,0E,<01 \| 00 \| 02>,00,A5` |
+| light on / off | `5A,06,B1,<point>,0A,<01 \| 00>,00,A5` |
+| dimmer level | `5A,06,B1,<point>,0C,<00–64>,00,A5` |
 
 The point and the level are one byte each, written in two hex digits.
+
+### What becomes of a received frame
+
+The type byte decides first. An RX frame (`C1`, a device reporting) is looked up in
+`database-service` by its data point and gateway, and the reading of a temperature sensor is
+published, dated with the moment the frame arrived; a STATUS frame (`C3`, the gateway's answer
+to a command — this service's or the other master's) and an ERROR frame (`C9`, a text of the
+gateway) are logged and never looked up. A status says whether the gateway sent the telegram:
+`1C 04` is sent (INFO), `09 xx` is not sent, with the reason — unknown command, data point out
+of range, RF busy (WARN; the caller of the command already got its 202, this line is all that
+tells it). A frame of a configured blinds, light or dimmer is logged and dropped until HAS-229.
+
+Nothing a frame does can stop the next one. Every failure is one line in the log, at the level
+the alerts expect:
+
+| Level | When |
+|---|---|
+| WARN | the parser refuses the frame; `database-service` knows no device for the data point (its 404 carries the code `NOT_FOUND_DEVICE_CONFIGURATION`) |
+| ERROR | `database-service` fails or cannot be reached (any 5xx, any other 4xx, a 404 without that code, an answer without a configuration or one that cannot be read), or does not answer within the timeout; anything unexpected |
+
+What a failing `database-service` said about the failure is in that line, after `downstream:`.
+The lookup needs `database-service` 0.8.0 or later — against an older one every unknown data
+point reads as an outage. Each frame is processed under an observation of its own, so the lines
+it writes share one `traceId`.
 
 ## Messaging
 
