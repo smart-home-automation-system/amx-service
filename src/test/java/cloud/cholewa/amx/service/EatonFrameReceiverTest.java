@@ -27,6 +27,7 @@ import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -43,9 +44,9 @@ import static org.mockito.Mockito.when;
 class EatonFrameReceiverTest {
 
     private static final ReceivedFrame TEMPERATURE =
-        new ReceivedFrame(EatonGatewayType.BLINDS, "5A,0C,C1,2D,62,17,00,00,F0,00,00,3A,10,A5");
+        new ReceivedFrame(EatonGatewayType.BLINDS, "5A,0C,C1,2D,62,17,00,00,F0,00,00,3A,10,A5", LocalDateTime.of(2026, 10, 14, 20, 15, 30));
     private static final ReceivedFrame ANOTHER =
-        new ReceivedFrame(EatonGatewayType.LIGHTS, "5A,0C,C1,2E,62,17,00,00,E2,00,00,41,10,A5");
+        new ReceivedFrame(EatonGatewayType.LIGHTS, "5A,0C,C1,2E,62,17,00,00,E2,00,00,41,10,A5", LocalDateTime.of(2026, 10, 14, 20, 15, 31));
     private static final Duration PATIENCE = Duration.ofSeconds(10);
 
     private final ListAppender<ILoggingEvent> receiverLog = new ListAppender<>();
@@ -167,6 +168,27 @@ class EatonFrameReceiverTest {
 
         assertThat(receiverLog.list).extracting(ILoggingEvent::getLevel).containsExactly(Level.INFO, Level.ERROR);
         assertThat(receiverLog.list.get(1).getThrowableProxy().getMessage()).isEqualTo("the broker is gone");
+    }
+
+    //the explanation of a failure must not become a failure of the receiver: a line all the same,
+    //and the next frame is taken
+    @Test
+    void should_go_on_when_the_failure_cannot_be_explained() {
+        when(amxService.consume(any())).thenReturn(Mono.error(
+            new ConfigurationCallException(HttpStatus.BAD_GATEWAY, Set.of()) {
+                @Override
+                public String describe() {
+                    throw new IllegalStateException("no words for it");
+                }
+            }));
+
+        sut.handle(TEMPERATURE).as(StepVerifier::create).verifyComplete();
+
+        assertThat(receiverLog.list).extracting(ILoggingEvent::getLevel).containsExactly(Level.INFO, Level.ERROR);
+        assertThat(receiverLog.list.get(1).getFormattedMessage())
+            .isEqualTo("Frame [5A,0C,C1,2D,62,17,00,00,F0,00,00,3A,10,A5] from gateway blinds not processed,"
+                + " and the failure could not be explained");
+        assertThat(receiverLog.list.get(1).getThrowableProxy().getMessage()).isEqualTo("no words for it");
     }
 
     //a frame has no request to take a trace from: each one is an observation of its own, started

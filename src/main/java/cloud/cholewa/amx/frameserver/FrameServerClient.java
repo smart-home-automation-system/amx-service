@@ -6,6 +6,8 @@ import cloud.cholewa.amx.infrastructure.error.EatonCommandException;
 import cloud.cholewa.home.model.EatonGatewayType;
 import io.netty.channel.ChannelOption;
 import io.netty.handler.codec.LineBasedFrameDecoder;
+import io.netty.handler.timeout.ReadTimeoutException;
+import io.netty.handler.timeout.ReadTimeoutHandler;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.SmartLifecycle;
@@ -24,10 +26,13 @@ import reactor.util.retry.Retry;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -69,9 +74,11 @@ import java.util.function.BiConsumer;
  * <li><b>A command its caller no longer waits for is not sent</b>, as long as its line was not
  * written: a blind does not move a minute after the request for it was given up.</li>
  * </ul>
- * What the client cannot know: a connection the other side dropped without a word looks open
- * until a command on it stays unanswered - that one command is a 504 - or until the master
- * closes it properly. And a frame that arrives while the receiver is more than
+ * A connection the other side dropped without a word - the master power-cycled, the address
+ * translation on the way forgotten - looks open to this side. The sensors of the house report
+ * every few seconds between them, so a connection on which <b>nothing arrived for
+ * {@link #READ_IDLE_LIMIT}</b> is taken for dead, closed and opened again. A command on such a
+ * connection before that is a 504. And a frame that arrives while the receiver is more than
  * {@value #FRAME_BUFFER} frames behind is dropped, with a line in the log.
  */
 @Slf4j
@@ -80,7 +87,12 @@ public class FrameServerClient implements SmartLifecycle {
 
     static final Duration RECONNECT_MIN = Duration.ofSeconds(1);
     static final Duration RECONNECT_MAX = Duration.ofSeconds(30);
+    static final Duration READ_IDLE_LIMIT = Duration.ofMinutes(5);
     static final int FRAME_BUFFER = 256;
+
+    //the socket is stopped after the web server and its graceful shutdown (their phases are
+    //DEFAULT_PHASE - 2048 and - 1024): a command served while the pod goes down still finds it
+    private static final int PHASE = DEFAULT_PHASE - 4096;
 
     //a frame line is at most 255 characters (the longest Eaton frame, C9, is 95)
     private static final int MAX_LINE_LENGTH = 256;
@@ -90,8 +102,10 @@ public class FrameServerClient implements SmartLifecycle {
     private static final String GATEWAY_SEPARATOR = ";";
 
     private final FrameServerProperties properties;
+    private final Clock clock;
     private final Duration reconnectMin;
     private final Duration reconnectMax;
+    private final Duration readIdleLimit;
     private final TcpClient tcpClient;
 
     private final Object emitting = new Object();
@@ -109,20 +123,33 @@ public class FrameServerClient implements SmartLifecycle {
     private volatile boolean running;
 
     @Autowired
-    public FrameServerClient(final FrameServerProperties properties) {
-        this(properties, RECONNECT_MIN, RECONNECT_MAX);
+    public FrameServerClient(final FrameServerProperties properties, final Clock clock) {
+        this(properties, clock, RECONNECT_MIN, RECONNECT_MAX, READ_IDLE_LIMIT);
     }
 
-    FrameServerClient(final FrameServerProperties properties, final Duration reconnectMin, final Duration reconnectMax) {
+    FrameServerClient(
+        final FrameServerProperties properties,
+        final Clock clock,
+        final Duration reconnectMin,
+        final Duration reconnectMax,
+        final Duration readIdleLimit
+    ) {
         this.properties = properties;
+        this.clock = clock;
         this.reconnectMin = reconnectMin;
         this.reconnectMax = reconnectMax;
+        this.readIdleLimit = readIdleLimit;
         //no pool: the one connection is kept here
         this.tcpClient = TcpClient.newConnection()
             .host(properties.host())
             .port(properties.port())
             .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, Math.toIntExact(properties.connectTimeout().toMillis()))
-            .doOnConnected(connection -> connection.addHandlerLast(new LineBasedFrameDecoder(MAX_LINE_LENGTH)));
+            .option(ChannelOption.SO_KEEPALIVE, true)
+            .doOnConnected(connection -> connection
+                //a connection nothing arrives on is closed by this handler, which ends it like any
+                //other failure and the loop opens another
+                .addHandlerLast(new ReadTimeoutHandler(readIdleLimit.toMillis(), TimeUnit.MILLISECONDS))
+                .addHandlerLast(new LineBasedFrameDecoder(MAX_LINE_LENGTH)));
         //one command at a time: the next one is started when this one has ended, however it ended
         this.worker = commands.asFlux().concatMap(this::carryOut, 1).subscribe(
             nothing -> { },
@@ -216,6 +243,11 @@ public class FrameServerClient implements SmartLifecycle {
         return running;
     }
 
+    @Override
+    public int getPhase() {
+        return PHASE;
+    }
+
     //one connection, kept until it ends; then the Mono completes and the loop opens the next one.
     //Only the connecting is repeated here - with a backoff, for as long as it takes: a master that
     //is switched off is announced once, at WARN, and every further attempt is a DEBUG line
@@ -237,7 +269,7 @@ public class FrameServerClient implements SmartLifecycle {
             })
             .retryWhen(Retry.backoff(Long.MAX_VALUE, reconnectMin).maxBackoff(reconnectMax))
             .flatMap(connection -> {
-                final Link opened = new Link(connection, this::received);
+                final Link opened = new Link(connection, readIdleLimit, this::received);
                 link.set(opened);
                 failedAttempts.set(0);
                 log.info("Connected to the AMX frame server");
@@ -245,7 +277,7 @@ public class FrameServerClient implements SmartLifecycle {
                     .doFinally(signal -> {
                         link.compareAndSet(opened, null);
                         if (running) {
-                            log.warn("The connection to the AMX frame server ended; connecting again");
+                            log.warn("The connection to the AMX frame server ended ({}); connecting again", opened.whyEnded());
                         }
                     });
             });
@@ -284,13 +316,15 @@ public class FrameServerClient implements SmartLifecycle {
         return null;
     }
 
+    //the text is made printable once, here: every line the frame is later logged in is safe
     private void frame(final EatonGatewayType gateway, final String frame) {
+        final ReceivedFrame received = new ReceivedFrame(gateway, printable(frame), LocalDateTime.now(clock));
         final Sinks.EmitResult result;
         synchronized (emitting) {
-            result = frames.tryEmitNext(new ReceivedFrame(gateway, frame));
+            result = frames.tryEmitNext(received);
         }
         if (result.isFailure()) {
-            log.warn("Frame [{}] of gateway {} dropped: the receiver takes none ({})", printable(frame), gateway, result);
+            log.warn("Frame [{}] of gateway {} dropped: the receiver takes none ({})", received.frame(), gateway, result);
         }
     }
 
@@ -417,13 +451,20 @@ public class FrameServerClient implements SmartLifecycle {
     private static final class Link {
 
         private final Connection connection;
+        private final Duration readIdleLimit;
         private final AtomicReference<Sinks.One<String>> awaited = new AtomicReference<>();
+        private volatile String whyEnded = "closed by this side";
 
-        private Link(final Connection connection, final BiConsumer<Link, String> lines) {
+        private Link(final Connection connection, final Duration readIdleLimit, final BiConsumer<Link, String> lines) {
             this.connection = connection;
+            this.readIdleLimit = readIdleLimit;
             //the decoder in front hands over whole lines; the stream ends when the connection does
             connection.inbound().receive().asString(StandardCharsets.US_ASCII)
                 .subscribe(line -> lines.accept(this, line), this::ended, () -> ended(null));
+        }
+
+        private String whyEnded() {
+            return whyEnded;
         }
 
         private boolean isOpen() {
@@ -456,6 +497,13 @@ public class FrameServerClient implements SmartLifecycle {
         }
 
         private void ended(final Throwable failure) {
+            if (failure instanceof ReadTimeoutException) {
+                whyEnded = "nothing arrived for " + readIdleLimit + ", taken for dead";
+            } else if (failure != null) {
+                whyEnded = failure.toString();
+            } else {
+                whyEnded = "closed by the server";
+            }
             connection.dispose();
             final Sinks.One<String> waiting = awaited.get();
             if (waiting != null) {

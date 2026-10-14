@@ -38,6 +38,20 @@ class ConfigurationCallExceptionTest {
         assertThat(new ConfigurationCallException(null, null, null).describe()).isEqualTo("lookup failed (no status): ");
     }
 
+    //ErrorMessage is public API: a message with neither is possible, and the line of the log
+    //must not throw for it - the receiver would end
+    @Test
+    void should_leave_out_a_message_without_details_or_message() {
+        final ConfigurationCallException exception = new ConfigurationCallException(
+            HttpStatus.BAD_GATEWAY,
+            Set.of(ErrorMessage.builder().build()),
+            Set.of(ErrorMessage.builder().build(), ErrorMessage.builder().message("said").build())
+        );
+
+        assertThat(exception.cause()).isEmpty();
+        assertThat(exception.describe()).isEqualTo("lookup failed (502):  - downstream: said");
+    }
+
     @Test
     void should_fall_back_to_the_message_when_an_error_has_no_details() {
         final ConfigurationCallException exception = new ConfigurationCallException(

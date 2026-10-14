@@ -8,8 +8,9 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-//errorMessages - the cause as this service names it; downstreamMessages - what database-service
-//said about a failure, raw exception text (SQL included) that belongs in the log line alone
+//errorMessages - the cause as this service names it, answered to a caller of a command;
+//downstreamMessages - what database-service said about a failure, raw exception text (SQL
+//included) that belongs in the log line alone
 @Getter
 public class ConfigurationCallException extends RuntimeException {
 
@@ -31,20 +32,25 @@ public class ConfigurationCallException extends RuntimeException {
         this.downstreamMessages = downstreamMessages == null ? Set.of() : downstreamMessages;
     }
 
+    //the cause in one line - what a caller is answered as details
+    public String cause() {
+        return join(errorMessages);
+    }
+
     //the line of the log: the status database-service was resolved to, the cause, and after
     //"- downstream:" what database-service itself said
     public String describe() {
         final String status = httpStatus == null ? "no status" : String.valueOf(httpStatus.value());
-        final String cause = join(errorMessages);
         return downstreamMessages.isEmpty()
-            ? "lookup failed (" + status + "): " + cause
-            : "lookup failed (" + status + "): " + cause + " - downstream: " + join(downstreamMessages);
+            ? "lookup failed (" + status + "): " + cause()
+            : "lookup failed (" + status + "): " + cause() + " - downstream: " + join(downstreamMessages);
     }
 
     private static String join(final Set<ErrorMessage> messages) {
         return messages.stream()
-            //a message without details (e.g. {"message":"boom"}) must not render as the string "null"
-            .map(message -> Objects.requireNonNullElse(message.getDetails(), message.getMessage()))
+            //a message without details (e.g. {"message":"boom"}) must not render as the string
+            //"null", and one without either must not throw
+            .map(message -> message.getDetails() != null ? message.getDetails() : message.getMessage())
             .filter(Objects::nonNull)
             .collect(Collectors.joining(", "));
     }

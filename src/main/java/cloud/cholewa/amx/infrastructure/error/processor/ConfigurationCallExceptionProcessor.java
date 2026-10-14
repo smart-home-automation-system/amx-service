@@ -1,20 +1,19 @@
 package cloud.cholewa.amx.infrastructure.error.processor;
 
+import cloud.cholewa.amx.infrastructure.error.ConfigurationCallException;
 import cloud.cholewa.commons.error.model.ErrorMessage;
 import cloud.cholewa.commons.error.model.Errors;
 import cloud.cholewa.commons.error.processor.ExceptionProcessor;
-import cloud.cholewa.amx.infrastructure.error.ConfigurationCallException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 
 import java.util.Collections;
 import java.util.Objects;
-import java.util.Set;
-import java.util.stream.Collectors;
 
-//answers with the status DeviceDatabaseClient resolved - 404 for an unknown data point, 502 for a
-//failing or unreachable database-service, 504 for one that did not answer in time - instead of a
-//blanket 400 that told the AMX controller its own request was wrong
+//answers a command whose registry call failed with the status the client resolved - 502 for a
+//failing or unreachable database-service, 504 for one that did not answer in time - instead of
+//a blanket 400 that told the caller its own request was wrong. What database-service said about
+//the failure stays in the log line: it is not part of the answer
 @Slf4j
 public class ConfigurationCallExceptionProcessor implements ExceptionProcessor {
 
@@ -24,16 +23,10 @@ public class ConfigurationCallExceptionProcessor implements ExceptionProcessor {
 
         final HttpStatus status = Objects.requireNonNullElse(exception.getHttpStatus(), HttpStatus.BAD_GATEWAY);
 
-        String errorMessages = join(exception.getErrorMessages());
-        //what database-service said about a failure stays here: it is not part of the answer
-        String logged = exception.getDownstreamMessages().isEmpty()
-            ? errorMessages
-            : errorMessages + " - downstream: " + join(exception.getDownstreamMessages());
-
         if (status.is5xxServerError()) {
-            log.error("Error processing configuration call ({}): {}", status.value(), logged);
+            log.error("Error processing configuration call: {}", exception.describe());
         } else {
-            log.warn("Error processing configuration call ({}): {}", status.value(), logged);
+            log.warn("Error processing configuration call: {}", exception.describe());
         }
 
         return Errors.builder()
@@ -41,17 +34,9 @@ public class ConfigurationCallExceptionProcessor implements ExceptionProcessor {
             .errors(Collections.singleton(
                 ErrorMessage.builder()
                     .message("Error processing configuration call")
-                    .details(errorMessages)
+                    .details(exception.cause())
                     .build()
             ))
             .build();
-    }
-
-    private static String join(final Set<ErrorMessage> messages) {
-        return messages.stream()
-            //a message without details (e.g. {"message":"boom"}) must not render as the string "null"
-            .map(message -> Objects.requireNonNullElse(message.getDetails(), message.getMessage()))
-            .filter(Objects::nonNull)
-            .collect(Collectors.joining(", "));
     }
 }

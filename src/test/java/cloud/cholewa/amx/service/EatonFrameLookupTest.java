@@ -32,6 +32,7 @@ import reactor.netty.http.client.HttpClient;
 import reactor.test.StepVerifier;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -49,8 +50,9 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class EatonFrameLookupTest {
 
+    private static final LocalDateTime RECEIVED_AT = LocalDateTime.of(2026, 10, 14, 20, 15, 30);
     private static final ReceivedFrame FRAME =
-        new ReceivedFrame(EatonGatewayType.BLINDS, "5A,0C,C1,12,62,17,00,00,F0,00,00,3A,10,A5");
+        new ReceivedFrame(EatonGatewayType.BLINDS, "5A,0C,C1,12,62,17,00,00,F0,00,00,3A,10,A5", RECEIVED_AT);
 
     //not a few hundred milliseconds: the first call of a fresh WebClient initialises Netty, and on a
     //CI runner that alone must not turn an answer into a 504. Above the 2 s DownstreamErrors gives an
@@ -94,12 +96,12 @@ class EatonFrameLookupTest {
 
     @Test
     void should_publish_the_reading_of_a_known_temperature_sensor() {
-        when(temperaturePublisher.publish(anyDouble(), any())).thenReturn(Mono.empty());
+        when(temperaturePublisher.publish(anyDouble(), any(), any())).thenReturn(Mono.empty());
         databaseService.enqueue(json(HttpStatus.OK, "{\"point\":18,\"type\":\"temperature sensor\",\"room\":\"kitchen\"}"));
 
         sut.handle(FRAME).as(StepVerifier::create).verifyComplete();
 
-        verify(temperaturePublisher).publish(24.0, RoomName.KITCHEN);
+        verify(temperaturePublisher).publish(24.0, RoomName.KITCHEN, RECEIVED_AT);
         assertThat(receiverLog.list).extracting(ILoggingEvent::getLevel).containsExactly(Level.INFO);
     }
 

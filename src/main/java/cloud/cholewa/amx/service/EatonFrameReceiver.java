@@ -60,24 +60,29 @@ public class EatonFrameReceiver {
         }
     }
 
-    //never fails
+    //never fails: not for what the pipeline does, and not for what the explaining of it does
     Mono<Void> handle(final ReceivedFrame received) {
         return Mono.defer(() -> {
-            final Observation observation = Observation.createNotStarted(OBSERVATION, observationRegistry)
-                .lowCardinalityKeyValue("gateway", received.gateway().getValue())
-                .start();
-            //logged inside the chain, where the observation is the trace of the line, and before the
-            //pipeline is subscribed to - its first lines are written on the subscribe itself
-            return Mono.fromRunnable(() -> log.info(
-                    "Received frame from gateway {}: [{}]", received.gateway(), received.frame()))
-                .then(Mono.defer(() -> amxService.consume(received)))
-                .onErrorResume(failure -> {
-                    explain(received, failure);
-                    return Mono.empty();
-                })
-                .doFinally(signal -> observation.stop())
-                .contextWrite(context -> context.put(ObservationThreadLocalAccessor.KEY, observation));
-        });
+                final Observation observation = Observation.createNotStarted(OBSERVATION, observationRegistry)
+                    .lowCardinalityKeyValue("gateway", received.gateway().getValue())
+                    .start();
+                //logged inside the chain, where the observation is the trace of the line, and before
+                //the pipeline is subscribed to - its first lines are written on the subscribe itself
+                return Mono.fromRunnable(() -> log.info(
+                        "Received frame from gateway {}: [{}]", received.gateway(), received.frame()))
+                    .then(Mono.defer(() -> amxService.consume(received)))
+                    .onErrorResume(failure -> {
+                        explain(received, failure);
+                        return Mono.empty();
+                    })
+                    .doFinally(signal -> observation.stop())
+                    .contextWrite(context -> context.put(ObservationThreadLocalAccessor.KEY, observation));
+            })
+            .onErrorResume(failure -> {
+                log.error("Frame [{}] from gateway {} not processed, and the failure could not be explained",
+                    received.frame(), received.gateway(), failure);
+                return Mono.empty();
+            });
     }
 
     private static void explain(final ReceivedFrame received, final Throwable failure) {

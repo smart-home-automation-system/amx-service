@@ -16,7 +16,10 @@ import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 
 import java.net.ServerSocket;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
@@ -41,6 +44,9 @@ class FrameServerClientTest {
     //the client connects again quickly here; in the application it is a second, up to thirty
     private static final Duration RECONNECT_MIN = Duration.ofMillis(100);
     private static final Duration RECONNECT_MAX = Duration.ofMillis(500);
+
+    private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 14, 20, 15, 30);
+    private static final Clock CLOCK = Clock.fixed(NOW.atZone(ZoneId.systemDefault()).toInstant(), ZoneId.systemDefault());
 
     private FrameServerStub server;
     private FrameServerClient sut;
@@ -240,8 +246,8 @@ class FrameServerClientTest {
 
         await().atMost(PATIENCE).until(() -> frames.size() == 2);
         assertThat(frames).containsExactly(
-            new ReceivedFrame(EatonGatewayType.LIGHTS, ACKNOWLEDGED),
-            new ReceivedFrame(EatonGatewayType.BLINDS, TEMPERATURE)
+            new ReceivedFrame(EatonGatewayType.LIGHTS, ACKNOWLEDGED, NOW),
+            new ReceivedFrame(EatonGatewayType.BLINDS, TEMPERATURE, NOW)
         );
         assertThat(server.connections()).isEqualTo(1);
     }
@@ -258,9 +264,9 @@ class FrameServerClientTest {
 
         await().atMost(PATIENCE).until(() -> frames.size() == 3);
         assertThat(frames).containsExactly(
-            new ReceivedFrame(EatonGatewayType.BLINDS, TEMPERATURE),
-            new ReceivedFrame(EatonGatewayType.LIGHTS, ACKNOWLEDGED),
-            new ReceivedFrame(EatonGatewayType.BLINDS, "5A,0C,C1,2E,62,17,00,00,E2,00,00,41,10,A5")
+            new ReceivedFrame(EatonGatewayType.BLINDS, TEMPERATURE, NOW),
+            new ReceivedFrame(EatonGatewayType.LIGHTS, ACKNOWLEDGED, NOW),
+            new ReceivedFrame(EatonGatewayType.BLINDS, "5A,0C,C1,2E,62,17,00,00,E2,00,00,41,10,A5", NOW)
         );
     }
 
@@ -298,7 +304,7 @@ class FrameServerClientTest {
         server.push("blinds;" + TEMPERATURE + "\n");
 
         await().atMost(PATIENCE).until(() -> frames.size() == 1);
-        assertThat(frames).containsExactly(new ReceivedFrame(EatonGatewayType.BLINDS, TEMPERATURE));
+        assertThat(frames).containsExactly(new ReceivedFrame(EatonGatewayType.BLINDS, TEMPERATURE, NOW));
         assertThat(server.connections()).isEqualTo(1);
     }
 
@@ -343,7 +349,7 @@ class FrameServerClientTest {
         }
         sut.stop();
         sut = new FrameServerClient(
-            new FrameServerProperties("127.0.0.1", nobody, Duration.ofSeconds(2), TIMEOUT), RECONNECT_MIN, RECONNECT_MAX);
+            new FrameServerProperties("127.0.0.1", nobody, Duration.ofSeconds(2), TIMEOUT), CLOCK, RECONNECT_MIN, RECONNECT_MAX, FrameServerClient.READ_IDLE_LIMIT);
         sut.start();
 
         final long started = System.nanoTime();
@@ -390,7 +396,7 @@ class FrameServerClientTest {
         }
         sut.stop();
         sut = new FrameServerClient(
-            new FrameServerProperties("127.0.0.1", port, Duration.ofSeconds(2), TIMEOUT), RECONNECT_MIN, RECONNECT_MAX);
+            new FrameServerProperties("127.0.0.1", port, Duration.ofSeconds(2), TIMEOUT), CLOCK, RECONNECT_MIN, RECONNECT_MAX, FrameServerClient.READ_IDLE_LIMIT);
         sut.start();
         pause(Duration.ofMillis(700));
         assertThat(sut.isConnected()).isFalse();
@@ -476,11 +482,54 @@ class FrameServerClientTest {
         assertThat(server.lines()).isEmpty();
     }
 
+    //the master power-cycled, the address translation on the way forgotten: no FIN ever comes,
+    //and a connection nothing arrives on is the only sign. Closed and opened again by itself
+    @SneakyThrows
+    @Test
+    void should_open_the_connection_again_when_nothing_arrives_for_the_idle_limit() {
+        sut.stop();
+        sut = connectedClient(TIMEOUT, Duration.ofMillis(500));
+        final int before = server.connections();
+        final List<ReceivedFrame> frames = new CopyOnWriteArrayList<>();
+        sut.frames().subscribe(frames::add);
+
+        await().atMost(PATIENCE).until(() -> server.connections() == before + 1 && sut.isConnected());
+
+        server.push("blinds;" + TEMPERATURE + "\n");
+        await().atMost(PATIENCE).until(() -> frames.size() == 1);
+        assertThat(server.lines()).isEmpty();
+    }
+
+    //a frame now and then keeps the connection: the limit is on silence, not on age
+    @SneakyThrows
+    @Test
+    void should_keep_a_connection_frames_arrive_on() {
+        sut.stop();
+        sut = connectedClient(TIMEOUT, Duration.ofMillis(500));
+        final int before = server.connections();
+        final List<ReceivedFrame> frames = new CopyOnWriteArrayList<>();
+        sut.frames().subscribe(frames::add);
+
+        for (int i = 0; i < 4; i++) {
+            pause(Duration.ofMillis(250));
+            server.push("blinds;" + TEMPERATURE + "\n");
+        }
+
+        await().atMost(PATIENCE).until(() -> frames.size() == 4);
+        assertThat(server.connections()).isEqualTo(before);
+    }
+
     private FrameServerClient connectedClient(final Duration responseTimeout) {
+        return connectedClient(responseTimeout, FrameServerClient.READ_IDLE_LIMIT);
+    }
+
+    private FrameServerClient connectedClient(final Duration responseTimeout, final Duration readIdleLimit) {
         final FrameServerClient client = new FrameServerClient(
             new FrameServerProperties("127.0.0.1", server.port(), Duration.ofSeconds(2), responseTimeout),
+            CLOCK,
             RECONNECT_MIN,
-            RECONNECT_MAX
+            RECONNECT_MAX,
+            readIdleLimit
         );
         client.start();
         await().atMost(PATIENCE).until(client::isConnected);
