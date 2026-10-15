@@ -4,6 +4,7 @@ import cloud.cholewa.amx.frameserver.FrameServerClient;
 import cloud.cholewa.amx.frameserver.ReceivedFrame;
 import cloud.cholewa.amx.infrastructure.error.ConfigurationCallException;
 import cloud.cholewa.amx.infrastructure.error.EatonParsingException;
+import cloud.cholewa.amx.rabbit.DeviceEventPublishException;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
 import io.micrometer.observation.contextpropagation.ObservationThreadLocalAccessor;
@@ -100,6 +101,12 @@ public class EatonFrameReceiver {
                     received.frame(), received.gateway(), lookup.describe()
                 );
             }
+        } else if (failure instanceof DeviceEventPublishException publishing) {
+            //the event of a device the services will not see: the broker's business, an ERROR
+            log.error(
+                "Frame [{}] from gateway {} not published: {}",
+                received.frame(), received.gateway(), publishing.getMessage()
+            );
         } else {
             log.error("Frame [{}] from gateway {} not processed", received.frame(), received.gateway(), failure);
         }

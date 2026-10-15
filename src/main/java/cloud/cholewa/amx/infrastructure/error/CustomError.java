@@ -20,6 +20,9 @@ public enum CustomError implements ErrorId {
     TEMPERATURE_SENSOR_INVALID_DEVICE_TYPE("Invalid device type for temperature sensor"),
     SIGNAL_STRENGTH_INVALID("Invalid value for signal strength"),
     BATTERY_LEVEL_INVALID("Invalid value of battery level"),
+    DEVICE_EVENT_INVALID_MESSAGE("Invalid message of a device: an RX frame of 12 bytes expected"),
+    DEVICE_EVENT_UNKNOWN_TYPE("Message type of a device not published as an event"),
+    DEVICE_EVENT_VALUE_NOT_AN_INTEGER("Analog value of a device is not a whole number"),
 
     //the causes of a command that was not carried out. Their names are the codes of the answer
     //(ErrorId.codeOf) - wire contract for a caller that branches on them, pinned by CustomErrorTest

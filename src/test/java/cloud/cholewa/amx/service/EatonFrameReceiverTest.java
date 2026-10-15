@@ -9,6 +9,7 @@ import cloud.cholewa.amx.frameserver.ReceivedFrame;
 import cloud.cholewa.amx.infrastructure.error.ConfigurationCallException;
 import cloud.cholewa.amx.infrastructure.error.CustomError;
 import cloud.cholewa.amx.infrastructure.error.EatonParsingException;
+import cloud.cholewa.amx.rabbit.DeviceEventPublishException;
 import cloud.cholewa.commons.error.model.ErrorMessage;
 import cloud.cholewa.home.model.EatonGatewayType;
 import io.micrometer.observation.Observation;
@@ -158,6 +159,20 @@ class EatonFrameReceiverTest {
         sut.handle(TEMPERATURE).as(StepVerifier::create).verifyComplete();
 
         assertThat(receiverLog.list).extracting(ILoggingEvent::getLevel).containsExactly(Level.INFO, Level.ERROR);
+    }
+
+    //an event the services of the devices will not see: the broker's business, and the alerts'
+    @Test
+    void should_log_an_error_when_the_event_of_a_device_was_not_published() {
+        when(amxService.consume(any())).thenReturn(Mono.error(new DeviceEventPublishException(
+            "Device event eaton.blinds.14 not confirmed by the broker within PT5S")));
+
+        sut.handle(TEMPERATURE).as(StepVerifier::create).verifyComplete();
+
+        assertThat(receiverLog.list).extracting(ILoggingEvent::getLevel).containsExactly(Level.INFO, Level.ERROR);
+        assertThat(receiverLog.list.get(1).getFormattedMessage())
+            .isEqualTo("Frame [5A,0C,C1,2D,62,17,00,00,F0,00,00,3A,10,A5] from gateway blinds not published:"
+                + " Device event eaton.blinds.14 not confirmed by the broker within PT5S");
     }
 
     @Test

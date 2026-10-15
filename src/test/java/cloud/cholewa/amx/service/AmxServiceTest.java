@@ -8,11 +8,16 @@ import cloud.cholewa.amx.device.client.DeviceDatabaseClient;
 import cloud.cholewa.amx.frameserver.ReceivedFrame;
 import cloud.cholewa.amx.infrastructure.error.ConfigurationCallException;
 import cloud.cholewa.amx.infrastructure.error.EatonParsingException;
+import cloud.cholewa.amx.rabbit.DeviceEventPublishException;
+import cloud.cholewa.amx.rabbit.DeviceEventPublisher;
 import cloud.cholewa.amx.rabbit.TemperaturePublisher;
+import cloud.cholewa.home.model.DeviceEvent;
 import cloud.cholewa.home.model.EatonConfigurationResponse;
 import cloud.cholewa.home.model.EatonGatewayType;
+import cloud.cholewa.home.model.EatonRxEvent;
 import cloud.cholewa.home.model.RoomName;
 import cloud.cholewa.home.model.SmartDeviceType;
+import cloud.cholewa.home.model.SmartVendor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -55,6 +60,9 @@ class AmxServiceTest {
 
     @Mock(answer = Answers.RETURNS_SMART_NULLS)
     private TemperaturePublisher temperaturePublisher;
+
+    @Mock(answer = Answers.RETURNS_SMART_NULLS)
+    private DeviceEventPublisher deviceEventPublisher;
 
     @InjectMocks
     private AmxService sut;
@@ -142,24 +150,99 @@ class AmxServiceTest {
         verifyNoMoreInteractions(deviceDatabaseClient);
     }
 
-    //the actuators report too - their status after a command, a button pressed - and until HAS-229
-    //nobody takes those: a line in the log, never a failure that would look like a broken frame
+    //an actuator reports its status after a command and a button pressed: an event for the
+    //services of the devices, named as the datagram names it - the gateway and the point
     @ParameterizedTest
-    @EnumSource(value = SmartDeviceType.class, names = {"BLINDS", "LIGHT", "DIMMER", "OTHER"})
-    void should_complete_without_publishing_when_the_device_is_not_a_temperature_sensor(final SmartDeviceType type) {
+    @EnumSource(value = SmartDeviceType.class, names = {"BLINDS", "LIGHT", "DIMMER"})
+    void should_publish_the_event_of_an_actuator(final SmartDeviceType type) {
         when(deviceDatabaseClient.getEatonConfiguration(anyInt(), any()))
-            .thenReturn(Mono.just(EatonConfigurationResponse.builder()
-                .point(14)
-                .type(type)
-                .room(RoomName.KITCHEN)
-                .build()));
+            .thenReturn(Mono.just(configuration(14, type)));
+        when(deviceEventPublisher.publish(any())).thenReturn(Mono.empty());
 
-        sut.consume(blinds("5A,0C,C1,0E,70,01,00,00,00,00,00,3A,10,A5"))
+        sut.consume(blinds("5A,0C,C1,0E,70,00,01,00,00,00,00,3A,10,A5"))
             .as(StepVerifier::create)
             .verifyComplete();
 
         verify(deviceDatabaseClient).getEatonConfiguration(14, EatonGatewayType.BLINDS);
+        verify(deviceEventPublisher).publish(DeviceEvent.builder()
+            .at(RECEIVED_AT)
+            .vendor(SmartVendor.EATON)
+            .gateway(EatonGatewayType.BLINDS)
+            .point(14)
+            .event(EatonRxEvent.STATUS)
+            .value(1)
+            .build());
         verifyNoInteractions(temperaturePublisher);
+        assertThat(serviceLog.list).singleElement().satisfies(event -> {
+            assertThat(event.getLevel()).isEqualTo(Level.INFO);
+            assertThat(event.getFormattedMessage())
+                .isEqualTo("Publishing status of a " + type + " in room kitchen on point 14");
+        });
+    }
+
+    //the event of the lights gateway is named by that gateway: a light on point 35 of the lights
+    //gateway is not the blind on point 35 of the other one
+    @Test
+    void should_publish_the_event_under_the_gateway_of_the_frame() {
+        when(deviceDatabaseClient.getEatonConfiguration(anyInt(), any()))
+            .thenReturn(Mono.just(configuration(35, SmartDeviceType.LIGHT)));
+        when(deviceEventPublisher.publish(any())).thenReturn(Mono.empty());
+
+        sut.consume(new ReceivedFrame(EatonGatewayType.LIGHTS, "5A,0C,C1,23,50,00,00,00,00,00,00,3A,10,A5", RECEIVED_AT))
+            .as(StepVerifier::create)
+            .verifyComplete();
+
+        verify(deviceDatabaseClient).getEatonConfiguration(35, EatonGatewayType.LIGHTS);
+        verify(deviceEventPublisher).publish(DeviceEvent.builder()
+            .at(RECEIVED_AT)
+            .vendor(SmartVendor.EATON)
+            .gateway(EatonGatewayType.LIGHTS)
+            .point(35)
+            .event(EatonRxEvent.PUSH_BUTTON_ON)
+            .build());
+    }
+
+    //a frame of an actuator the parser cannot read is refused before anything is published
+    @Test
+    void should_throw_exception_when_the_frame_of_an_actuator_carries_an_unknown_message_type() {
+        when(deviceDatabaseClient.getEatonConfiguration(anyInt(), any()))
+            .thenReturn(Mono.just(configuration(14, SmartDeviceType.BLINDS)));
+
+        sut.consume(blinds("5A,0C,C1,0E,80,00,12,00,00,00,00,3A,10,A5"))
+            .as(StepVerifier::create)
+            .expectError(EatonParsingException.class)
+            .verify();
+
+        verifyNoInteractions(deviceEventPublisher, temperaturePublisher);
+    }
+
+    //what the broker did not take is the receiver's to log, at ERROR
+    @Test
+    void should_fail_when_the_event_was_not_published() {
+        when(deviceDatabaseClient.getEatonConfiguration(anyInt(), any()))
+            .thenReturn(Mono.just(configuration(14, SmartDeviceType.BLINDS)));
+        when(deviceEventPublisher.publish(any()))
+            .thenReturn(Mono.error(new DeviceEventPublishException("not confirmed")));
+
+        sut.consume(blinds("5A,0C,C1,0E,70,00,02,00,00,00,00,3A,10,A5"))
+            .as(StepVerifier::create)
+            .expectError(DeviceEventPublishException.class)
+            .verify();
+    }
+
+    //OTHER is no device this service can read: a line in the log, never a failure that would look
+    //like a broken frame
+    @Test
+    void should_complete_without_publishing_when_the_device_is_of_the_type_other() {
+        when(deviceDatabaseClient.getEatonConfiguration(anyInt(), any()))
+            .thenReturn(Mono.just(configuration(14, SmartDeviceType.OTHER)));
+
+        sut.consume(blinds("5A,0C,C1,0E,70,00,01,00,00,00,00,3A,10,A5"))
+            .as(StepVerifier::create)
+            .verifyComplete();
+
+        verify(deviceDatabaseClient).getEatonConfiguration(14, EatonGatewayType.BLINDS);
+        verifyNoInteractions(temperaturePublisher, deviceEventPublisher);
         assertThat(serviceLog.list).extracting(ILoggingEvent::getLevel).containsExactly(Level.WARN);
     }
 
@@ -285,6 +368,14 @@ class AmxServiceTest {
         verify(temperaturePublisher).publish(24.0, RoomName.KITCHEN, RECEIVED_AT);
 
         verifyNoMoreInteractions(deviceDatabaseClient, temperaturePublisher);
+    }
+
+    private static EatonConfigurationResponse configuration(final int point, final SmartDeviceType type) {
+        return EatonConfigurationResponse.builder()
+            .point(point)
+            .type(type)
+            .room(RoomName.KITCHEN)
+            .build();
     }
 
     private static ReceivedFrame blinds(final String frame) {
