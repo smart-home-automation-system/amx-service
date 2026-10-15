@@ -174,9 +174,11 @@ The type byte decides first. An RX frame (`C1`, a device reporting) is looked up
 published, dated with the moment the frame arrived; a STATUS frame (`C3`, the gateway's answer
 to a command — this service's or the other master's) and an ERROR frame (`C9`, a text of the
 gateway) are logged and never looked up. A status says whether the gateway sent the telegram:
-`1C 04` is sent (INFO), `09 xx` is not sent, with the reason — unknown command, data point out
-of range, RF busy (WARN; the caller of the command already got its 202, this line is all that
-tells it). A frame of a configured blinds, light or dimmer is published as a device event (see
+`1C 04` is sent (INFO); `09 01`–`09 04` is not sent, with the reason — unknown command, data
+point out of range, RF busy; `09 06` is sent and acknowledged by no actuator (nothing on that
+point, or out of range); `09 05` and any other error by its number (all WARN; the caller of the
+command already got its 202, this line is all that tells it). A frame of a configured blinds,
+light, dimmer, push button or motion sensor is published as a device event (see
 [Messaging](#messaging)); a device of the type `other` is logged (WARN) and dropped.
 
 Nothing a frame does can stop the next one. Every failure is one line in the log, at the level
@@ -199,8 +201,9 @@ it writes share one `traceId`.
 | publishes | fanout exchange `temperature.events` | `/temperature` | `TemperatureMessage` (room, temperature, date) |
 | publishes | topic exchange `amq.topic`, routing key `eaton.<gateway>.<point>` | `/device` | `DeviceEvent` of `smart-home-sdk` |
 
-**Device events** (since HAS-229): what an Eaton blind, light or dimmer reports — its status
-after a command, a button pressed — published over a second connection (`<pod>/device`, user
+**Device events** (since HAS-229): what an Eaton blind, light, dimmer, wall push button or PIR
+sensor reports — its status after a command, a button pressed, a motion detected (push buttons
+and PIR sensors since HAS-288) — published over a second connection (`<pod>/device`, user
 `device`) with publisher confirms. The event names the device as the frame does, by gateway and
 point; the consumer looks it up in the device registry. Every `device.<env>.<domain>` queue is
 bound with `#`, so each of them gets every event.
@@ -211,6 +214,8 @@ bound with `#`, so each of them gets every event.
 
 `value` comes with `status` — blinds `0` stop, `1` open, `2` close; a switch `0` off, `1` on; a
 dimmer its level 0–100 — and with an `analog value` that is a whole number; the other events
-(`push button on`, `up pressed`, …) carry none. `at` is the moment the frame arrived. A device
-is published only when the registry holds its point as blinds, light or dimmer; push buttons and
-PIR sensors are not yet.
+(`push button on`, `up pressed`, …) carry none. A wall push button reports `push button on` /
+`push button off`, a PIR sensor `switch on` / `switch off`. `at` is the moment the frame
+arrived. A device is published only when the registry holds its point as blinds, light,
+dimmer, push button or motion sensor (`smart-home-sdk` 1.9.0 or later, which this service must
+run before `database-service` answers the last two).

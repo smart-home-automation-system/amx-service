@@ -202,6 +202,43 @@ class AmxServiceTest {
             .build());
     }
 
+    //a wall push button and a PIR sensor only report - as the frames of the house have them: the
+    //buttons of the bathroom upstairs push button on / off (50 / 51), the PIR of the stairs
+    //switch on / off (52 / 53); neither carries a value
+    @ParameterizedTest
+    @CsvSource({
+        "PUSH_BUTTON, 50, PUSH_BUTTON_ON",
+        "PUSH_BUTTON, 51, PUSH_BUTTON_OFF",
+        "MOTION_SENSOR, 52, SWITCH_ON",
+        "MOTION_SENSOR, 53, SWITCH_OFF"
+    })
+    void should_publish_what_a_push_button_and_a_motion_sensor_report(
+        final SmartDeviceType type, final String messageType, final EatonRxEvent event
+    ) {
+        when(deviceDatabaseClient.getEatonConfiguration(anyInt(), any()))
+            .thenReturn(Mono.just(configuration(80, type)));
+        when(deviceEventPublisher.publish(any())).thenReturn(Mono.empty());
+
+        sut.consume(new ReceivedFrame(
+                EatonGatewayType.LIGHTS, "5A,0C,C1,50," + messageType + ",00,00,00,00,00,00,3A,10,A5", RECEIVED_AT))
+            .as(StepVerifier::create)
+            .verifyComplete();
+
+        verify(deviceEventPublisher).publish(DeviceEvent.builder()
+            .at(RECEIVED_AT)
+            .vendor(SmartVendor.EATON)
+            .gateway(EatonGatewayType.LIGHTS)
+            .point(80)
+            .event(event)
+            .build());
+        verifyNoInteractions(temperaturePublisher);
+        assertThat(serviceLog.list).singleElement().satisfies(line -> {
+            assertThat(line.getLevel()).isEqualTo(Level.INFO);
+            assertThat(line.getFormattedMessage())
+                .isEqualTo("Publishing " + event.getValue() + " of a " + type + " in room kitchen on point 80");
+        });
+    }
+
     //a frame of an actuator the parser cannot read is refused before anything is published
     @Test
     void should_throw_exception_when_the_frame_of_an_actuator_carries_an_unknown_message_type() {
@@ -273,8 +310,7 @@ class AmxServiceTest {
         "5A,08,C3,09,01,00,00,00,00,A5 | unknown command",
         "5A,08,C3,09,02,00,00,00,00,A5 | data point out of range",
         "5A,08,C3,09,03,00,00,00,00,A5 | RF busy, the telegram was lost",
-        "5A,08,C3,09,04,00,00,00,00,A5 | RF busy receiving",
-        "5A,08,C3,09,07,00,00,00,00,A5 | error 07"
+        "5A,08,C3,09,04,00,00,00,00,A5 | RF busy receiving"
     })
     void should_warn_about_a_telegram_the_gateway_did_not_send(final String frame, final String reason) {
         sut.consume(new ReceivedFrame(EatonGatewayType.LIGHTS, frame, RECEIVED_AT))
@@ -286,6 +322,43 @@ class AmxServiceTest {
             assertThat(event.getLevel()).isEqualTo(Level.WARN);
             assertThat(event.getFormattedMessage())
                 .isEqualTo("Gateway lights did not send a telegram: " + reason + " [" + frame + "]");
+        });
+    }
+
+    //06: the telegram went out and nothing confirmed it - not "not sent", which would send whoever
+    //reads the log looking at the gateway instead of the actuator
+    @Test
+    void should_warn_about_a_telegram_no_actuator_acknowledged() {
+        final String frame = "5A,08,C3,09,06,00,00,00,00,A5";
+
+        sut.consume(new ReceivedFrame(EatonGatewayType.LIGHTS, frame, RECEIVED_AT))
+            .as(StepVerifier::create)
+            .verifyComplete();
+
+        verifyNoInteractions(deviceDatabaseClient, temperaturePublisher);
+        assertThat(serviceLog.list).singleElement().satisfies(event -> {
+            assertThat(event.getLevel()).isEqualTo(Level.WARN);
+            assertThat(event.getFormattedMessage())
+                .isEqualTo("Gateway lights sent a telegram no actuator acknowledged [" + frame + "]");
+        });
+    }
+
+    //05 and anything newer: told by its number, without claiming what happened to the telegram
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+        "5A,08,C3,09,05,00,00,00,00,A5 | 05",
+        "5A,08,C3,09,07,00,00,00,00,A5 | 07"
+    })
+    void should_warn_about_another_error_of_the_gateway_by_its_number(final String frame, final String status) {
+        sut.consume(new ReceivedFrame(EatonGatewayType.LIGHTS, frame, RECEIVED_AT))
+            .as(StepVerifier::create)
+            .verifyComplete();
+
+        verifyNoInteractions(deviceDatabaseClient, temperaturePublisher);
+        assertThat(serviceLog.list).singleElement().satisfies(event -> {
+            assertThat(event.getLevel()).isEqualTo(Level.WARN);
+            assertThat(event.getFormattedMessage())
+                .isEqualTo("Gateway lights reported error " + status + " for a telegram [" + frame + "]");
         });
     }
 
