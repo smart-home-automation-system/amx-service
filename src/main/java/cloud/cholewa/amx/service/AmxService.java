@@ -46,14 +46,18 @@ public class AmxService {
     //STT_OK with STS_OK_MRF: the gateway took the telegram. The data bytes after them vary
     private static final String STATUS_OK = "1C";
     private static final String STATUS_OK_MRF = "04";
-    //STT_ERROR: the telegram was not sent, the status says why
+    //STT_ERROR: the status says what went wrong - for these four the telegram was not sent
     private static final String STATUS_ERROR = "09";
-    private static final Map<String, String> ERROR_REASONS = Map.of(
+    private static final Map<String, String> NOT_SENT_REASONS = Map.of(
         "01", "unknown command",
         "02", "data point out of range",
         "03", "RF busy, the telegram was lost",
         "04", "RF busy receiving"
     );
+    //statusNoAcknowledgement of the NetLinx module: the telegram went out and no actuator confirmed
+    //it - nothing listens on that point, or it is out of range or without power (seen in the
+    //inventory of 2026-10-15 on the points of dismantled lights)
+    private static final String ERROR_NO_ACKNOWLEDGEMENT = "06";
 
     private final DeviceDatabaseClient deviceDatabaseClient;
     private final TemperaturePublisher temperaturePublisher;
@@ -87,11 +91,13 @@ public class AmxService {
             final String status = parts[STATUS_INDEX];
             if (STATUS_OK.equals(statusType) && STATUS_OK_MRF.equals(status)) {
                 log.info("Gateway {} took a telegram: [{}]", received.gateway(), frame);
+            } else if (STATUS_ERROR.equals(statusType) && NOT_SENT_REASONS.containsKey(status)) {
+                log.warn("Gateway {} did not send a telegram: {} [{}]", received.gateway(), NOT_SENT_REASONS.get(status), frame);
+            } else if (STATUS_ERROR.equals(statusType) && ERROR_NO_ACKNOWLEDGEMENT.equals(status)) {
+                log.warn("Gateway {} sent a telegram no actuator acknowledged [{}]", received.gateway(), frame);
             } else if (STATUS_ERROR.equals(statusType)) {
-                log.warn(
-                    "Gateway {} did not send a telegram: {} [{}]",
-                    received.gateway(), ERROR_REASONS.getOrDefault(status, "error " + status), frame
-                );
+                //05 (statusRepeatMessage of the NetLinx module) and anything newer: not told apart here
+                log.warn("Gateway {} reported error {} for a telegram [{}]", received.gateway(), status, frame);
             } else {
                 log.info("Gateway {} sent a status of type {}: [{}]", received.gateway(), statusType, frame);
             }
@@ -107,8 +113,10 @@ public class AmxService {
 
     //what the registry says the point is decides where the reading goes: a room temperature to
     //heating-service, what an actuator reports - its status after a command (70), a button
-    //pressed - to the services of the devices, as the datagram names it. OTHER is no device this
-    //service can read: a line in the log, not a failure, the frames keep coming
+    //pressed - to the services of the devices, as the datagram names it; so does a wall push
+    //button (push button on / off) and a PIR sensor (switch on / off), which only ever report.
+    //OTHER is no device this service can read: a line in the log, not a failure, the frames
+    //keep coming
     private Mono<Void> publish(
         final ReceivedFrame received,
         final List<String> message,
@@ -119,7 +127,7 @@ public class AmxService {
                     log.info("Publishing message type: {} for room: {}", configuration.getType(), configuration.getRoom()))
                 .then(temperaturePublisher.publish(
                     calculateRoomTemperature(message), configuration.getRoom(), received.receivedAt()));
-            case BLINDS, LIGHT, DIMMER -> Mono.fromSupplier(() -> parse(message, received.gateway(), received.receivedAt()))
+            case BLINDS, LIGHT, DIMMER, PUSH_BUTTON, MOTION_SENSOR -> Mono.fromSupplier(() -> parse(message, received.gateway(), received.receivedAt()))
                 .doOnNext(event -> log.info(
                     "Publishing {} of a {} in room {} on point {}",
                     event.getEvent(), configuration.getType(), configuration.getRoom(), event.getPoint()

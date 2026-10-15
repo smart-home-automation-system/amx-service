@@ -35,7 +35,7 @@
 
 		<!--  internal dependencies versions-->
 		<cholewa-commons.version>1.8.0</cholewa-commons.version>
-		<smart-home-sdk.version>1.8.0</smart-home-sdk.version>
+		<smart-home-sdk.version>1.9.0</smart-home-sdk.version>
 
 		<!--  plugins versions-->
 		<maven-enforcer-plugin.version>3.6.3</maven-enforcer-plugin.version>

@@ -207,9 +207,17 @@ The other direction: `POST /home/amx/eaton/blinds/{point}`, `.../lights/{point}`
 - **The event names the device the way the datagram does** — vendor `eaton`, the gateway, the
   point — never by the registry: the consumer looks the device up in the registry itself. The
   lookup here only decides *whether* a frame is published: an Eaton point the registry does not
-  hold as blinds, light or dimmer is not. The push buttons and PIR sensors of the house have no
-  type the Eaton configuration answers (a `motion sensor` is a 404), so their frames stay WARN
-  lines of an unknown data point until `database-service` maps them.
+  hold as blinds, light, dimmer, push button or motion sensor is not. The last two (HAS-288,
+  `smart-home-sdk` 1.9.0) only report - a wall push button `push button on / off`, a PIR sensor
+  `switch on / off` - and are never sent anything: the writes look the device up by the kind of
+  the command (`blinds`, `light`), so a push button cannot be driven by mistake. **This service
+  has to run 1.9.0 before `database-service` answers either type** - on an older SDK the lookup
+  of such a point does not deserialize, and every one of its frames is an ERROR.
+- **The gateway's error statuses (`C3`, type `09`) are worded by what they mean**: `01`–`04`
+  the telegram was not sent; `06` (`statusNoAcknowledgement` of the NetLinx module) it went out
+  and no actuator confirmed it - the point has no actuator, or one out of range or without
+  power, seen on the dismantled lights of the inventory of 2026-10-15; `05` and anything newer
+  by number only. All WARN: the caller already has its 202.
 - **The RX layout is `moe_protocol.h`** (the `CLAUDE.md` of `amx` has it): after
   `extractMessage` the indexes are length 0, type 1 (`C1`), point 2, message type 3, data type 4,
   info short 5, data 6–9 (high byte first), RSSI 10, battery 11. Only a 12-byte `C1` frame is an
