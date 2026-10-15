@@ -61,6 +61,17 @@ amx:
     connect-timeout: 2s
     response-timeout: 3s
 
+# the events of the Eaton actuators (HAS-229), published over a second connection to the same
+# broker as spring.rabbitmq.*: the virtual host of the devices, where the Shelly devices publish
+# over MQTT, and its topic exchange, bound with "#" to every device.<env>.<domain> queue. The
+# password has no default on purpose: it comes from the manifest (DEVICE_EVENTS_PASSWORD), and a
+# pod without it must not start
+device-events:
+  virtual-host: /device
+  username: device
+  exchange: amq.topic
+  confirm-timeout: 5s
+
 logbook:
   format:
     style: json
@@ -121,6 +132,10 @@ amx:
   frame-server:
     host: localhost
     port: 1
+
+# nothing connects in a test: the connection is opened by the first publish
+device-events:
+  password: test
 
 logbook:
   format:

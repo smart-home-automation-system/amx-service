@@ -3,8 +3,9 @@
 `cloud.cholewa:amx-service` — the bridge between the AMX/NetLinx control system and the backend:
 the AMX master forwards every frame it receives from the Eaton wireless gateways over a TCP
 socket, this service parses it, finds out which device the data point is and publishes the
-result on RabbitMQ; commands for Eaton blinds and lights go back over the same socket as raw
-frames. Reactive (WebFlux), Java 21, Spring Boot 4.1.1 (`spring-boot-starter-parent`), Maven.
+result on RabbitMQ — a room temperature for `heating-service`, what an actuator reports as a
+`DeviceEvent` for the services of the devices; commands for Eaton blinds and lights go back
+over the same socket as raw frames. Reactive (WebFlux), Java 21, Spring Boot 4.1.1 (`spring-boot-starter-parent`), Maven.
 Local port **6001** (management **8001**); in the deployed `home` profile **6200** with Actuator
 on **8200**. Docker image `magikabdul/amx-service`; the pom keeps `0.0.1-SNAPSHOT`, the released
 version comes from the git tag. Not to be confused with `amx` (the NetLinx sources of the
@@ -39,8 +40,11 @@ section "The line protocol of the socket" — a change there is a change here). 
    `TemperatureMessage` to the fanout exchange `temperature.events` (vhost `/temperature`),
    consumed by `heating-service` alone: `temperature.prod.heating` in the cluster, and
    `temperature.dev.heating` — bound to the same exchange, so it gets a copy of every
-   reading — when that service runs locally. Blinds, lights, dimmers and `OTHER` are **not
-   supported yet**: a WARN and the frame is dropped (HAS-229 publishes them as device events).
+   reading — when that service runs locally. `BLINDS`, `LIGHT` and `DIMMER` (HAS-229) →
+   `DeviceEventParser` reads the RX frame into a `DeviceEvent` of `smart-home-sdk` and
+   `DeviceEventPublisher` publishes it to `amq.topic` of the vhost `/device` with the routing
+   key `eaton.<gateway>.<point>` (below, "Device events"). `OTHER` is a WARN and the frame is
+   dropped — `database-service` never answers it today (a kind without an old type is a 404).
 
 The other direction: `POST /home/amx/eaton/blinds/{point}`, `.../lights/{point}`,
 `.../lights/{point}/level` (`EatonCommandController`) → `EatonCommandService` →
@@ -189,9 +193,6 @@ The other direction: `POST /home/amx/eaton/blinds/{point}`, `.../lights/{point}`
   `SmartDevice` by kind). A new `RoomName`, `LightKind`, `BlindsPlacement` or `SmartVendor`
   stored on a device of the kind `blinds` or `light` before this service has the SDK that knows
   it makes the list undecodable — every command of that kind a 502.
-- **Do not register Eaton blinds or lights before HAS-229 is deployed.** A frame of a configured
-  `BLINDS` / `LIGHT` / `DIMMER` is dropped with a WARN — and an actuator answers every command
-  with a frame of its own, so each command would leave a WARN behind.
 - **The codes are wire contract** (`CustomError`, pinned by `CustomErrorTest`): `NOT_FOUND_DEVICE`,
   `AMBIGUOUS_POINT`, `NOT_A_DIMMER`, `FRAME_SERVER_UNAVAILABLE`, `FRAME_SERVER_TIMEOUT`,
   `FRAME_REFUSED`. `EatonCommandException`'s message is answered as `details` — put nothing in
@@ -201,6 +202,54 @@ The other direction: `POST /home/amx/eaton/blinds/{point}`, `.../lights/{point}`
   `DeviceRegistryClient` repeats the failure chain of `DeviceDatabaseClient` — a fix to one
   belongs in both.
 
+## Device events — read before touching `DeviceEventParser` or `DeviceEventPublisher`
+
+- **The event names the device the way the datagram does** — vendor `eaton`, the gateway, the
+  point — never by the registry: the consumer looks the device up in the registry itself. The
+  lookup here only decides *whether* a frame is published: an Eaton point the registry does not
+  hold as blinds, light or dimmer is not. The push buttons and PIR sensors of the house have no
+  type the Eaton configuration answers (a `motion sensor` is a 404), so their frames stay WARN
+  lines of an unknown data point until `database-service` maps them.
+- **The RX layout is `moe_protocol.h`** (the `CLAUDE.md` of `amx` has it): after
+  `extractMessage` the indexes are length 0, type 1 (`C1`), point 2, message type 3, data type 4,
+  info short 5, data 6–9 (high byte first), RSSI 10, battery 11. Only a 12-byte `C1` frame is an
+  event.
+- **`value` only for `status` and `analog value`** (the SDK says so): the status of an actuator
+  is its **info short** — blinds `0` stop / `1` open / `2` close, a switch `0` / `1`, a dimmer
+  its level 0–100; an analog value is read by its data type, only when it is a whole number —
+  percent (`01`, the byte 0–255 published as 0–100) or unsigned short (`0D`). A temperature,
+  a float or room-controller data is refused (WARN). A message type without an event (`63`,
+  `64`, `80`, …) is refused too, never published under another name.
+- **`RxEventType` and `EatonRxEvent` share names, not order**: mapped by name, every constant
+  pinned by `DeviceEventParserTest`.
+- **A second connection, never a bean** (`DeviceEventConnection`, built in
+  `DeviceEventsRabbitConfig`): a connection belongs to one vhost and the one of
+  `spring.rabbitmq.*` leads to `/temperature`; any `ConnectionFactory` or `RabbitOperations`
+  bean would make `RabbitAutoConfiguration` back off and take the observation and retry of the
+  temperature publisher with it (`DeviceEventConnectionTest` counts the beans). It is the shape
+  of `NotificationConnection` of `cholewa-commons` — a copy on purpose: that class names its
+  connection `/notification` and words its returns as notifications. The broker shows it as
+  `<pod>/device`; user `device`, the password `device-events.password` has no default
+  (`DEVICE_EVENTS_PASSWORD` in the manifest, secret `rabbitmq`, key `device-password`) — a pod
+  without it does not start, and a local run needs it in the env file.
+- **A publish is done when the broker confirmed it and did not hand it back** (correlated
+  confirms, mandatory returns), within `device-events.confirm-timeout` (5 s, bounded 1–10 s) —
+  **the send and the confirmation together**: a send stuck on opening a connection (10 s of
+  `spring.rabbitmq.connection-timeout`) would otherwise hold the frames twice as long. Anything
+  else is a `DeviceEventPublishException` and **the ERROR line of the receiver**, with the
+  cause; nothing is retried — the next frame of the device says its state again (a send cut off
+  by the timeout may still arrive: late, never twice). The frames are processed one at a time,
+  so a broker that does not answer holds the next frame up to the timeout. The confirmation arrives on the thread of the connection: the chain moves to
+  `boundedElastic` before anything else runs (the lesson of `NotificationPublisher`).
+- **Every `device.<env>.<domain>` queue is bound to `amq.topic` with `#`**, so every event
+  reaches the `prod` and the `dev` queues of every domain, and a local run that publishes
+  reaches the queues of production too. A routing key with no queue at all is a returned
+  message — an ERROR, not a quiet loss.
+- The JSON is the converter of the temperature messages (`JacksonJsonMessageConverter`):
+  `{"at":"2026-10-15T18:30:05","vendor":"eaton","gateway":"blinds","point":14,"event":"status","value":1}`,
+  `at` the arrival of the frame, no `value` where the event carries none — pinned by
+  `DeviceEventConnectionTest`.
+
 ## RabbitMQ
 
 - **No own `RabbitTemplate` bean** (`RabbitConfig`): `RabbitAutoConfiguration` backs off from
@@ -209,7 +258,8 @@ The other direction: `POST /home/amx/eaton/blinds/{point}`, `.../lights/{point}`
   into `heating-service`) and the `retry` block. The message converter bean is picked up by the
   configurer.
 - `TemperaturePublisher` wraps the blocking `convertAndSend` in `Mono.fromRunnable` on
-  `Schedulers.boundedElastic()` — the one deliberate blocking call on this service's path.
+  `Schedulers.boundedElastic()`, and `DeviceEventPublisher` its send the same way — the
+  deliberate blocking calls on this service's path.
 
 ## Build, tests & gotchas
 

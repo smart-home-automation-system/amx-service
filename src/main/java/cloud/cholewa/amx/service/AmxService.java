@@ -3,6 +3,7 @@ package cloud.cholewa.amx.service;
 import cloud.cholewa.amx.device.client.DeviceDatabaseClient;
 import cloud.cholewa.amx.eaton.model.PayloadType;
 import cloud.cholewa.amx.frameserver.ReceivedFrame;
+import cloud.cholewa.amx.rabbit.DeviceEventPublisher;
 import cloud.cholewa.amx.rabbit.TemperaturePublisher;
 import cloud.cholewa.home.model.EatonConfigurationResponse;
 import lombok.RequiredArgsConstructor;
@@ -18,6 +19,7 @@ import java.util.Objects;
 import static cloud.cholewa.amx.eaton.utils.MessageUtilities.extractDataPoint;
 import static cloud.cholewa.amx.eaton.utils.MessageUtilities.extractMessage;
 import static cloud.cholewa.amx.eaton.utils.MessageValidator.isValidEatonMessage;
+import static cloud.cholewa.amx.eaton.utils.device.DeviceEventParser.parse;
 import static cloud.cholewa.amx.eaton.utils.device.TemperatureParser.calculateRoomTemperature;
 
 /**
@@ -55,6 +57,7 @@ public class AmxService {
 
     private final DeviceDatabaseClient deviceDatabaseClient;
     private final TemperaturePublisher temperaturePublisher;
+    private final DeviceEventPublisher deviceEventPublisher;
 
     public Mono<Void> consume(final ReceivedFrame received) {
         return Mono.fromSupplier(() -> received.frame().strip().toUpperCase(Locale.ROOT))
@@ -102,9 +105,10 @@ public class AmxService {
             .flatMap(t -> publish(received, t.getT1(), t.getT2()));
     }
 
-    //what the registry says the point is decides where the reading goes. The actuators report
-    //too - their status after a command (70), a button pressed - and until HAS-229 nobody takes
-    //those: a line in the log, not a failure, the frames keep coming
+    //what the registry says the point is decides where the reading goes: a room temperature to
+    //heating-service, what an actuator reports - its status after a command (70), a button
+    //pressed - to the services of the devices, as the datagram names it. OTHER is no device this
+    //service can read: a line in the log, not a failure, the frames keep coming
     private Mono<Void> publish(
         final ReceivedFrame received,
         final List<String> message,
@@ -115,8 +119,14 @@ public class AmxService {
                     log.info("Publishing message type: {} for room: {}", configuration.getType(), configuration.getRoom()))
                 .then(temperaturePublisher.publish(
                     calculateRoomTemperature(message), configuration.getRoom(), received.receivedAt()));
-            case BLINDS, LIGHT, DIMMER, OTHER -> Mono.fromRunnable(() -> log.warn(
-                "Frame of a {} in room {} not published: device events are not supported until HAS-229",
+            case BLINDS, LIGHT, DIMMER -> Mono.fromSupplier(() -> parse(message, received.gateway(), received.receivedAt()))
+                .doOnNext(event -> log.info(
+                    "Publishing {} of a {} in room {} on point {}",
+                    event.getEvent(), configuration.getType(), configuration.getRoom(), event.getPoint()
+                ))
+                .flatMap(deviceEventPublisher::publish);
+            case OTHER -> Mono.fromRunnable(() -> log.warn(
+                "Frame of a device of the type {} in room {} not published: no event is defined for it",
                 configuration.getType(), configuration.getRoom()
             ));
         };

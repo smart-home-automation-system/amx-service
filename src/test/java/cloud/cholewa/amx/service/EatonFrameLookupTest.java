@@ -8,6 +8,7 @@ import cloud.cholewa.amx.device.client.DeviceDatabaseClient;
 import cloud.cholewa.amx.device.client.DeviceDatabaseClientConfig;
 import cloud.cholewa.amx.frameserver.FrameServerClient;
 import cloud.cholewa.amx.frameserver.ReceivedFrame;
+import cloud.cholewa.amx.rabbit.DeviceEventPublisher;
 import cloud.cholewa.amx.rabbit.TemperaturePublisher;
 import cloud.cholewa.home.model.EatonGatewayType;
 import cloud.cholewa.home.model.RoomName;
@@ -67,6 +68,9 @@ class EatonFrameLookupTest {
     @Mock
     private TemperaturePublisher temperaturePublisher;
 
+    @Mock
+    private DeviceEventPublisher deviceEventPublisher;
+
     private MockWebServer databaseService;
     private EatonFrameReceiver sut;
 
@@ -81,7 +85,7 @@ class EatonFrameLookupTest {
             new DeviceDatabaseClientConfig("localhost", String.valueOf(databaseService.getPort()), RESPONSE_TIMEOUT)
         );
         sut = new EatonFrameReceiver(
-            frameServerClient, new AmxService(deviceDatabaseClient, temperaturePublisher), ObservationRegistry.NOOP);
+            frameServerClient, new AmxService(deviceDatabaseClient, temperaturePublisher, deviceEventPublisher), ObservationRegistry.NOOP);
 
         receiverLog.start();
         receiverLogger().addAppender(receiverLog);
