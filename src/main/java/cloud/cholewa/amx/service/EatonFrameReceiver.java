@@ -105,7 +105,7 @@ public class EatonFrameReceiver {
             //the event of a device the services will not see: the broker's business, an ERROR
             log.error(
                 "Frame [{}] from gateway {} not published: {}",
-                received.frame(), received.gateway(), publishing.getMessage()
+                received.frame(), received.gateway(), publishing.getMessage(), publishing
             );
         } else {
             log.error("Frame [{}] from gateway {} not processed", received.frame(), received.gateway(), failure);

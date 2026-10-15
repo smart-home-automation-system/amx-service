@@ -56,15 +56,19 @@ public class DeviceEventPublisher {
             .onErrorMap(failure -> new DeviceEventPublishException(
                     "Device event " + routingKey + " not sent: " + failure.getMessage(), failure))
             .flatMap(correlationData -> Mono.fromFuture(correlationData.getFuture())
-                .timeout(confirmTimeout)
-                .onErrorMap(TimeoutException.class, timeout -> new DeviceEventPublishException(
-                    "Device event " + routingKey + " not confirmed by the broker within " + confirmTimeout, timeout))
                 //Spring AMQP completes the future on the thread that reads the frames of the
                 //connection, inside the lock of the channel: whatever follows - the next frame of
                 //the receiver - must not run there (the lesson of NotificationPublisher)
                 .publishOn(Schedulers.boundedElastic())
                 .flatMap(confirm -> verifyDelivery(routingKey, correlationData, confirm)))
-            .doOnSuccess(unused -> log.info("Published device event {}: {}", routingKey, event.getEvent()));
+            //the send and the confirmation together: the frames wait one after the other, so a
+            //send stuck on opening a connection must not hold them up longer than a confirmation.
+            //A send cut off here may still reach the broker - nothing is repeated, so it is the
+            //event published late, never twice
+            .timeout(confirmTimeout)
+            .onErrorMap(TimeoutException.class, timeout -> new DeviceEventPublishException(
+                "Device event " + routingKey + " not taken by the broker within " + confirmTimeout, timeout))
+            .doOnSuccess(unused -> log.debug("Published device event {}: {}", routingKey, event.getEvent()));
     }
 
     static String routingKeyOf(final DeviceEvent event) {

@@ -21,9 +21,9 @@ import java.time.temporal.ChronoUnit;
  * fail every publish.<br>
  * {@code exchange} - the topic exchange every client of {@code /device} publishes to, MQTT
  * included; the queues of the device services are bound to it with {@code #}.<br>
- * {@code confirmTimeout} - how long the confirmation of the broker is waited for. The frames are
- * processed one at a time, so this is also how long one broker that does not answer holds up the
- * next frame. A bare number is seconds.
+ * {@code confirmTimeout} - how long a publish may take, the send and the confirmation of the
+ * broker together. The frames are processed one at a time, so this is also how long one broker
+ * that does not answer holds up the next frame. A bare number is seconds.
  */
 @Validated
 @ConfigurationProperties(prefix = "device-events")

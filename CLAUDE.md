@@ -233,11 +233,13 @@ The other direction: `POST /home/amx/eaton/blinds/{point}`, `.../lights/{point}`
   (`DEVICE_EVENTS_PASSWORD` in the manifest, secret `rabbitmq`, key `device-password`) — a pod
   without it does not start, and a local run needs it in the env file.
 - **A publish is done when the broker confirmed it and did not hand it back** (correlated
-  confirms, mandatory returns), within `device-events.confirm-timeout` (5 s, bounded 1–10 s).
-  Anything else is a `DeviceEventPublishException` and **the ERROR line of the receiver**;
-  nothing is retried — the next frame of the device says its state again. The frames are
-  processed one at a time, so a broker that does not confirm holds the next frame up to the
-  timeout. The confirmation arrives on the thread of the connection: the chain moves to
+  confirms, mandatory returns), within `device-events.confirm-timeout` (5 s, bounded 1–10 s) —
+  **the send and the confirmation together**: a send stuck on opening a connection (10 s of
+  `spring.rabbitmq.connection-timeout`) would otherwise hold the frames twice as long. Anything
+  else is a `DeviceEventPublishException` and **the ERROR line of the receiver**, with the
+  cause; nothing is retried — the next frame of the device says its state again (a send cut off
+  by the timeout may still arrive: late, never twice). The frames are processed one at a time,
+  so a broker that does not answer holds the next frame up to the timeout. The confirmation arrives on the thread of the connection: the chain moves to
   `boundedElastic` before anything else runs (the lesson of `NotificationPublisher`).
 - **Every `device.<env>.<domain>` queue is bound to `amq.topic` with `#`**, so every event
   reaches the `prod` and the `dev` queues of every domain, and a local run that publishes

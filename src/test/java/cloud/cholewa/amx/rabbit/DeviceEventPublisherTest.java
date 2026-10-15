@@ -102,8 +102,24 @@ class DeviceEventPublisherTest {
             .as(StepVerifier::create)
             .expectErrorSatisfies(failure -> assertThat(failure)
                 .isInstanceOf(DeviceEventPublishException.class)
-                .hasMessage("Device event eaton.blinds.14 not confirmed by the broker within PT0.2S"))
+                .hasMessage("Device event eaton.blinds.14 not taken by the broker within PT0.2S"))
             .verify(Duration.ofSeconds(5));
+    }
+
+    //a send stuck on opening the connection holds the next frame no longer than a confirmation
+    @Test
+    void should_fail_when_the_send_itself_takes_too_long() {
+        doAnswer(invocation -> {
+            Thread.sleep(2_000);
+            return null;
+        }).when(rabbitOperations).convertAndSend(eq(EXCHANGE), eq("eaton.blinds.14"), eq(EVENT), any(CorrelationData.class));
+
+        publisher(Duration.ofMillis(200)).publish(EVENT)
+            .as(StepVerifier::create)
+            .expectErrorSatisfies(failure -> assertThat(failure)
+                .isInstanceOf(DeviceEventPublishException.class)
+                .hasMessage("Device event eaton.blinds.14 not taken by the broker within PT0.2S"))
+            .verify(Duration.ofSeconds(1));
     }
 
     @Test
