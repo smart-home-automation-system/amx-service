@@ -33,8 +33,9 @@ permanent connection. This service is its only client:
 - **In**: every frame a gateway receives (a room sensor reporting, a button pressed, an
   actuator telling its state) arrives as one line. The service validates it, asks
   `database-service` which device the data point belongs to, and publishes the result on
-  RabbitMQ for the services that act on it — today the room temperatures consumed by
-  `heating-service`.
+  RabbitMQ for the services that act on it — the room temperatures for `heating-service`,
+  and what an Eaton blind, light or dimmer reports as a device event for the services of the
+  devices (see [Messaging](#messaging)).
 - **Out**: a command for an Eaton blinds or light actuator is turned into the raw frame of the
   gateway and sent as one line; the master writes it to the serial gateway (see
   [Eaton commands](#eaton-commands)).
@@ -65,6 +66,9 @@ receives nothing and cannot move a blind by accident; the client keeps trying, w
 | `amx.frame-server.port` | `20010` | |
 | `amx.frame-server.connect-timeout` | `2s` | one attempt to connect; the attempts go on, 1 s to 30 s apart, until one succeeds. 1 to 5 s, a bare number is seconds |
 | `amx.frame-server.response-timeout` | `3s` | the wait for the answer to a frame that was sent; 1 to 10 s, a bare number is seconds |
+
+| `device-events.password` | none — **mandatory** | the broker user `device` of the vhost `/device`; in the cluster from `DEVICE_EVENTS_PASSWORD` of the manifest, and a pod without it does not start |
+| `device-events.confirm-timeout` | `5s` | how long publishing one device event may take, the send and the confirmation of the broker together; 1 to 10 s, a bare number is seconds |
 
 The lookup in `database-service` is bounded by `internal.service.database.response-timeout`
 (default `PT5S`).
@@ -172,15 +176,16 @@ to a command — this service's or the other master's) and an ERROR frame (`C9`,
 gateway) are logged and never looked up. A status says whether the gateway sent the telegram:
 `1C 04` is sent (INFO), `09 xx` is not sent, with the reason — unknown command, data point out
 of range, RF busy (WARN; the caller of the command already got its 202, this line is all that
-tells it). A frame of a configured blinds, light or dimmer is logged and dropped until HAS-229.
+tells it). A frame of a configured blinds, light or dimmer is published as a device event (see
+[Messaging](#messaging)); a device of the type `other` is logged (WARN) and dropped.
 
 Nothing a frame does can stop the next one. Every failure is one line in the log, at the level
 the alerts expect:
 
 | Level | When |
 |---|---|
-| WARN | the parser refuses the frame; `database-service` knows no device for the data point (its 404 carries the code `NOT_FOUND_DEVICE_CONFIGURATION`) |
-| ERROR | `database-service` fails or cannot be reached (any 5xx, any other 4xx, a 404 without that code, an answer without a configuration or one that cannot be read), or does not answer within the timeout; anything unexpected |
+| WARN | the parser refuses the frame (also the frame of an actuator with a message type that has no event, or an analog value that is not a whole number); `database-service` knows no device for the data point (its 404 carries the code `NOT_FOUND_DEVICE_CONFIGURATION`) |
+| ERROR | `database-service` fails or cannot be reached (any 5xx, any other 4xx, a 404 without that code, an answer without a configuration or one that cannot be read), or does not answer within the timeout; a device event the broker did not take (not sent, refused, routed to no queue, or not confirmed within `device-events.confirm-timeout`); anything unexpected |
 
 What a failing `database-service` said about the failure is in that line, after `downstream:`.
 The lookup needs `database-service` 0.8.0 or later — against an older one every unknown data
@@ -192,3 +197,20 @@ it writes share one `traceId`.
 | Direction | Exchange / queue | vhost | Payload |
 |---|---|---|---|
 | publishes | fanout exchange `temperature.events` | `/temperature` | `TemperatureMessage` (room, temperature, date) |
+| publishes | topic exchange `amq.topic`, routing key `eaton.<gateway>.<point>` | `/device` | `DeviceEvent` of `smart-home-sdk` |
+
+**Device events** (since HAS-229): what an Eaton blind, light or dimmer reports — its status
+after a command, a button pressed — published over a second connection (`<pod>/device`, user
+`device`) with publisher confirms. The event names the device as the frame does, by gateway and
+point; the consumer looks it up in the device registry. Every `device.<env>.<domain>` queue is
+bound with `#`, so each of them gets every event.
+
+```json
+{"at":"2026-10-15T18:30:05","vendor":"eaton","gateway":"blinds","point":14,"event":"status","value":1}
+```
+
+`value` comes with `status` — blinds `0` stop, `1` open, `2` close; a switch `0` off, `1` on; a
+dimmer its level 0–100 — and with an `analog value` that is a whole number; the other events
+(`push button on`, `up pressed`, …) carry none. `at` is the moment the frame arrived. A device
+is published only when the registry holds its point as blinds, light or dimmer; push buttons and
+PIR sensors are not yet.
