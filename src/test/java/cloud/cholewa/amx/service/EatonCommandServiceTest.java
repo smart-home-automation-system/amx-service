@@ -67,6 +67,35 @@ class EatonCommandServiceTest {
             .verifyComplete();
     }
 
+    //HAS-291: 0B with the data 00 - the gateway documents no other data for a status request
+    @Test
+    void should_send_the_status_request_of_a_blind_to_the_gateway_of_the_registry() {
+        when(eatonDeviceRegistry.find(DeviceKind.BLINDS, 9))
+            .thenReturn(Mono.just(device(DeviceKind.BLINDS, EatonGatewayType.BLINDS, 9, null)));
+        when(frameServerClient.send(EatonGatewayType.BLINDS, "5A,06,B1,09,0B,00,00,A5"))
+            .thenReturn(Mono.empty());
+
+        sut.requestBlindsStatus(9)
+            .as(StepVerifier::create)
+            .expectNext(SENT_AT)
+            .verifyComplete();
+    }
+
+    //a status request is for a blind: a light on the point is not asked by this path
+    @Test
+    void should_send_no_status_request_to_a_point_without_a_blind() {
+        final EatonCommandException unknown =
+            new EatonCommandException(HttpStatus.NOT_FOUND, CustomError.NOT_FOUND_DEVICE, "no blind");
+        when(eatonDeviceRegistry.find(DeviceKind.BLINDS, 35)).thenReturn(Mono.error(unknown));
+
+        sut.requestBlindsStatus(35)
+            .as(StepVerifier::create)
+            .expectErrorSatisfies(throwable -> assertThat(throwable).isSameAs(unknown))
+            .verify();
+
+        verifyNoInteractions(frameServerClient);
+    }
+
     //the gateway is the one the registry names, whatever the kind of the device suggests
     @Test
     void should_send_the_frame_of_a_light_to_the_gateway_it_is_registered_on() {
