@@ -46,7 +46,8 @@ section "The line protocol of the socket" — a change there is a change here). 
    key `eaton.<gateway>.<point>` (below, "Device events"). `OTHER` is a WARN and the frame is
    dropped — `database-service` never answers it today (a kind without an old type is a 404).
 
-The other direction: `POST /home/amx/eaton/blinds/{point}`, `.../lights/{point}`,
+The other direction: `POST /home/amx/eaton/blinds/{point}`, `.../blinds/{point}/status` (the
+status request `0B` of HAS-291, for `blinds-service`), `.../lights/{point}`,
 `.../lights/{point}/level` (`EatonCommandController`) → `EatonCommandService` →
 `EatonDeviceRegistry` (which gateway) → `EatonFrameBuilder` → `FrameServerClient`. 202 with
 `sentAt` once the server said `OK`. The contract for callers is in the README.

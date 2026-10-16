@@ -89,12 +89,13 @@ Base path `/home` (`spring.webflux.base-path`); in the cluster the ingress route
 | Method | Path | Description |
 |---|---|---|
 | POST | `/home/amx/eaton/blinds/{point}?command=open\|close\|stop` | Move the Eaton blinds on a data point |
+| POST | `/home/amx/eaton/blinds/{point}/status` | Ask the Eaton blinds actuator on a data point for its status (HAS-291) |
 | POST | `/home/amx/eaton/lights/{point}?turn=on\|off` | Switch the Eaton light on a data point |
 | POST | `/home/amx/eaton/lights/{point}/level?value=0..100` | Set the level, in percent, of the Eaton dimmer on a data point |
 
 ### Eaton commands
 
-The three writes answer **202** with `{"sentAt": "2026-10-13T20:06:44"}` — the local time of the
+The four writes answer **202** with `{"sentAt": "2026-10-13T20:06:44"}` — the local time of the
 house at which the frame server took the frame. 202 and not 200: the answer says the frame was
 handed to the gateway, never that the device did what it was told. What the device did is told
 by its own frame, which arrives like every other one.
@@ -105,9 +106,15 @@ What a caller has to know:
   `database-service` (`GET /home/device/registry?kind=`, 0.12.0 or later). The device has to be
   registered with the kind the command is for — `blinds` or `light` — and an Eaton binding; a
   point that holds a room sensor is not sent a blinds frame.
-- **`command` is `open`, `close` or `stop`, `turn` is `on` or `off`, exactly as written.** Anything
+- **`command` is `open`, `| POST | `/home/amx/eaton/blinds/{point}?command=open|close|stop` | Move the Eaton blinds on a data point |
+| POST | `/home/amx/eaton/blinds/{point}/status` | Ask the Eaton blinds actuator on a data point for its status (HAS-291) |` or `stop`, `turn` is `on` or `off`, exactly as written.** Anything
   else is a 400 — a typo moves nothing and switches nothing off.
 - **A level is for a dimmer**: a light whose `lightKind` in the registry is `dimmer`.
+- **A status request is for a blind** (HAS-291) and takes no parameter: it sends the event `0B`
+  (data `00`), never a move. The answer is the actuator's usual status frame - `1` opening, `2`
+  closing, `0` stopped - published as a `status` event like any other; the 202 says only that the
+  request went out. Asked after the end of a run the actuator says it stopped, which tells no
+  direction - `blinds-service` asks within seconds of a command whose movement was not reported.
 - **The registry is kept for five minutes.** A device that was just registered or corrected is
   driven at once (before a command is refused the registry is read again, at most once in ten
   seconds); a device that was removed, or moved to the other gateway, is driven the old way for
@@ -161,7 +168,8 @@ frames this service sends are the TX packet of the gateway's protocol as documen
 
 | Command | Frame |
 |---|---|
-| blinds open / close / stop | `5A,06,B1,<point>,0E,<01 \| 00 \| 02>,00,A5` |
+| blinds open / | POST | `/home/amx/eaton/blinds/{point}?command=open|close|stop` | Move the Eaton blinds on a data point |
+| POST | `/home/amx/eaton/blinds/{point}/status` | Ask the Eaton blinds actuator on a data point for its status (HAS-291) | / stop | `5A,06,B1,<point>,0E,<01 \| 00 \| 02>,00,A5` |
 | light on / off | `5A,06,B1,<point>,0A,<01 \| 00>,00,A5` |
 | dimmer level | `5A,06,B1,<point>,0C,<00–64>,00,A5` |
 
@@ -212,7 +220,8 @@ bound with `#`, so each of them gets every event.
 {"at":"2026-10-15T18:30:05","vendor":"eaton","gateway":"blinds","point":14,"event":"status","value":1}
 ```
 
-`value` comes with `status` — blinds `0` stop, `1` open, `2` close; a switch `0` off, `1` on; a
+`value` comes with `status` — blinds `0` stop, `1` open, `2` | POST | `/home/amx/eaton/blinds/{point}?command=open|close|stop` | Move the Eaton blinds on a data point |
+| POST | `/home/amx/eaton/blinds/{point}/status` | Ask the Eaton blinds actuator on a data point for its status (HAS-291) |; a switch `0` off, `1` on; a
 dimmer its level 0–100 — and with an `analog value` that is a whole number; the other events
 (`push button on`, `up pressed`, …) carry none. A wall push button reports `push button on` /
 `push button off`, a PIR sensor `switch on` / `switch off`. `at` is the moment the frame
