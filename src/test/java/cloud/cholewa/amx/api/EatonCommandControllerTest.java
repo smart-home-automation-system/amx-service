@@ -34,6 +34,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 //what a caller of the commands gets: the status, the body and - for a failure - the code and the
@@ -79,6 +80,23 @@ class EatonCommandControllerTest {
             .jsonPath("$.sentAt").isEqualTo("2026-10-13T18:30:05");
     }
 
+    //HAS-291: a path of its own, which takes no command - a command sent along changes nothing
+    @ParameterizedTest
+    @ValueSource(strings = {"/amx/eaton/blinds/9/status", "/amx/eaton/blinds/9/status?command=open"})
+    void should_accept_a_blinds_status_request_and_say_when_the_frame_was_sent(final String uri) {
+        when(eatonCommandService.requestBlindsStatus(9)).thenReturn(Mono.just(SENT_AT));
+
+        webTestClient.post()
+            .uri(uri)
+            .exchange()
+            .expectStatus().isAccepted()
+            .expectBody()
+            .jsonPath("$.sentAt").isEqualTo("2026-10-13T18:30:05");
+
+        verify(eatonCommandService).requestBlindsStatus(9);
+        verifyNoMoreInteractions(eatonCommandService);
+    }
+
     @ParameterizedTest
     @CsvSource({"on,true", "off,false"})
     void should_accept_a_light_switch(final String turn, final boolean on) {
@@ -109,6 +127,8 @@ class EatonCommandControllerTest {
     @ValueSource(strings = {
         "/amx/eaton/blinds/0?command=open",
         "/amx/eaton/blinds/100?command=open",
+        "/amx/eaton/blinds/0/status",
+        "/amx/eaton/blinds/100/status",
         "/amx/eaton/lights/0?turn=on",
         "/amx/eaton/lights/100?turn=on",
         "/amx/eaton/lights/0/level?value=50",
@@ -173,6 +193,7 @@ class EatonCommandControllerTest {
         "/amx/eaton/lights/7",
         "/amx/eaton/lights/12/level",
         "/amx/eaton/blinds/five?command=open",
+        "/amx/eaton/blinds/five/status",
         "/amx/eaton/lights/12/level?value=half"
     })
     void should_refuse_a_request_without_its_parameter_or_with_one_that_is_no_number(final String uri) {
@@ -246,10 +267,11 @@ class EatonCommandControllerTest {
             .expectStatus().isEqualTo(status);
     }
 
-    @Test
-    void should_not_answer_a_get() {
+    @ParameterizedTest
+    @ValueSource(strings = {"/amx/eaton/blinds/5?command=open", "/amx/eaton/blinds/5/status"})
+    void should_not_answer_a_get(final String uri) {
         webTestClient.get()
-            .uri("/amx/eaton/blinds/5?command=open")
+            .uri(uri)
             .exchange()
             .expectStatus().isEqualTo(HttpStatus.METHOD_NOT_ALLOWED);
 

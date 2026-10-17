@@ -37,6 +37,13 @@ public class EatonCommandService {
             .flatMap(device -> send(device, EatonFrameBuilder.blinds(point, command)));
     }
 
+    //asks a blinds actuator for its state (HAS-291); it answers with its 70 status, which arrives
+    //and is published like every other one - a status event, nothing new on the broker
+    public Mono<LocalDateTime> requestBlindsStatus(final int point) {
+        return eatonDeviceRegistry.find(DeviceKind.BLINDS, point)
+            .flatMap(device -> send(device, EatonFrameBuilder.statusRequest(point)));
+    }
+
     public Mono<LocalDateTime> switchLight(final int point, final boolean on) {
         return eatonDeviceRegistry.find(DeviceKind.LIGHT, point)
             .flatMap(device -> send(device, EatonFrameBuilder.lightSwitch(point, on)));

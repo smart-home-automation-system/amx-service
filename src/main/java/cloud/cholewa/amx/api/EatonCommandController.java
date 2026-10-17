@@ -51,6 +51,19 @@ public class EatonCommandController {
             .map(EatonCommandController::accepted);
     }
 
+    //a status request is not a move, so it is a path of its own and not a fourth command: it
+    //sends 0B, never 0E. The 202 says the request went out; the state arrives as a status event
+    @PostMapping("/blinds/{point}/status")
+    Mono<ResponseEntity<FrameSentResponse>> requestBlindsStatus(
+        @PathVariable
+        @Min(value = EatonFrameBuilder.MIN_POINT, message = POINT_RANGE)
+        @Max(value = EatonFrameBuilder.MAX_POINT, message = POINT_RANGE) final int point
+    ) {
+        return eatonCommandService.requestBlindsStatus(point)
+            .doOnSubscribe(subscription -> log.info("Blinds on point: {} asked for its status", point))
+            .map(EatonCommandController::accepted);
+    }
+
     //on or off and nothing else: a typo must not switch a light off
     @PostMapping("/lights/{point}")
     Mono<ResponseEntity<FrameSentResponse>> switchLight(
