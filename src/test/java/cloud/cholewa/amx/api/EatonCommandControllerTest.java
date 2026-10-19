@@ -97,6 +97,23 @@ class EatonCommandControllerTest {
         verifyNoMoreInteractions(eatonCommandService);
     }
 
+    //HAS-259: the status request of a light, a path of its own like the one of a blind
+    @ParameterizedTest
+    @ValueSource(strings = {"/amx/eaton/lights/35/status", "/amx/eaton/lights/35/status?turn=on"})
+    void should_accept_a_light_status_request_and_say_when_the_frame_was_sent(final String uri) {
+        when(eatonCommandService.requestLightStatus(35)).thenReturn(Mono.just(SENT_AT));
+
+        webTestClient.post()
+            .uri(uri)
+            .exchange()
+            .expectStatus().isAccepted()
+            .expectBody()
+            .jsonPath("$.sentAt").isEqualTo("2026-10-13T18:30:05");
+
+        verify(eatonCommandService).requestLightStatus(35);
+        verifyNoMoreInteractions(eatonCommandService);
+    }
+
     @ParameterizedTest
     @CsvSource({"on,true", "off,false"})
     void should_accept_a_light_switch(final String turn, final boolean on) {
@@ -131,6 +148,8 @@ class EatonCommandControllerTest {
         "/amx/eaton/blinds/100/status",
         "/amx/eaton/lights/0?turn=on",
         "/amx/eaton/lights/100?turn=on",
+        "/amx/eaton/lights/0/status",
+        "/amx/eaton/lights/100/status",
         "/amx/eaton/lights/0/level?value=50",
         "/amx/eaton/lights/100/level?value=50"
     })
@@ -194,6 +213,7 @@ class EatonCommandControllerTest {
         "/amx/eaton/lights/12/level",
         "/amx/eaton/blinds/five?command=open",
         "/amx/eaton/blinds/five/status",
+        "/amx/eaton/lights/five/status",
         "/amx/eaton/lights/12/level?value=half"
     })
     void should_refuse_a_request_without_its_parameter_or_with_one_that_is_no_number(final String uri) {
@@ -268,7 +288,7 @@ class EatonCommandControllerTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/amx/eaton/blinds/5?command=open", "/amx/eaton/blinds/5/status"})
+    @ValueSource(strings = {"/amx/eaton/blinds/5?command=open", "/amx/eaton/blinds/5/status", "/amx/eaton/lights/5/status"})
     void should_not_answer_a_get(final String uri) {
         webTestClient.get()
             .uri(uri)
