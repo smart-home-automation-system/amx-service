@@ -81,6 +81,19 @@ public class EatonCommandController {
             .map(EatonCommandController::accepted);
     }
 
+    //the status request of a light (HAS-259), a path of its own like the one of a blind: 0B, never
+    //a switch. The 202 says the request went out; the state arrives as a status event
+    @PostMapping("/lights/{point}/status")
+    Mono<ResponseEntity<FrameSentResponse>> requestLightStatus(
+        @PathVariable
+        @Min(value = EatonFrameBuilder.MIN_POINT, message = POINT_RANGE)
+        @Max(value = EatonFrameBuilder.MAX_POINT, message = POINT_RANGE) final int point
+    ) {
+        return eatonCommandService.requestLightStatus(point)
+            .doOnSubscribe(subscription -> log.info("Light on point: {} asked for its status", point))
+            .map(EatonCommandController::accepted);
+    }
+
     @PostMapping("/lights/{point}/level")
     Mono<ResponseEntity<FrameSentResponse>> setLightLevel(
         @PathVariable

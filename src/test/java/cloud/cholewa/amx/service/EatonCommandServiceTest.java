@@ -96,6 +96,35 @@ class EatonCommandServiceTest {
         verifyNoInteractions(frameServerClient);
     }
 
+    //HAS-259: the same 0B for a light, sent to the gateway the registry names
+    @Test
+    void should_send_the_status_request_of_a_light_to_the_gateway_of_the_registry() {
+        when(eatonDeviceRegistry.find(DeviceKind.LIGHT, 35))
+            .thenReturn(Mono.just(device(DeviceKind.LIGHT, EatonGatewayType.LIGHTS, 35, null)));
+        when(frameServerClient.send(EatonGatewayType.LIGHTS, "5A,06,B1,23,0B,00,00,A5"))
+            .thenReturn(Mono.empty());
+
+        sut.requestLightStatus(35)
+            .as(StepVerifier::create)
+            .expectNext(SENT_AT)
+            .verifyComplete();
+    }
+
+    //a status request of a light is for a light: a blind on the point is not asked by this path
+    @Test
+    void should_send_no_light_status_request_to_a_point_without_a_light() {
+        final EatonCommandException unknown =
+            new EatonCommandException(HttpStatus.NOT_FOUND, CustomError.NOT_FOUND_DEVICE, "no light");
+        when(eatonDeviceRegistry.find(DeviceKind.LIGHT, 9)).thenReturn(Mono.error(unknown));
+
+        sut.requestLightStatus(9)
+            .as(StepVerifier::create)
+            .expectErrorSatisfies(throwable -> assertThat(throwable).isSameAs(unknown))
+            .verify();
+
+        verifyNoInteractions(frameServerClient);
+    }
+
     //the gateway is the one the registry names, whatever the kind of the device suggests
     @Test
     void should_send_the_frame_of_a_light_to_the_gateway_it_is_registered_on() {

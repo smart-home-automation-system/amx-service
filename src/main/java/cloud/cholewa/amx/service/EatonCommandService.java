@@ -44,6 +44,13 @@ public class EatonCommandService {
             .flatMap(device -> send(device, EatonFrameBuilder.statusRequest(point)));
     }
 
+    //asks a switching or dimming actuator for its state (HAS-259): the same 0B as for a blind; the
+    //answer is its 70 status - 0 / 1 for a switch, the level for a dimmer - published as usual
+    public Mono<LocalDateTime> requestLightStatus(final int point) {
+        return eatonDeviceRegistry.find(DeviceKind.LIGHT, point)
+            .flatMap(device -> send(device, EatonFrameBuilder.statusRequest(point)));
+    }
+
     public Mono<LocalDateTime> switchLight(final int point, final boolean on) {
         return eatonDeviceRegistry.find(DeviceKind.LIGHT, point)
             .flatMap(device -> send(device, EatonFrameBuilder.lightSwitch(point, on)));
