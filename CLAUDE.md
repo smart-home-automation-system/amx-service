@@ -48,6 +48,7 @@ section "The line protocol of the socket" — a change there is a change here). 
 
 The other direction: `POST /home/amx/eaton/blinds/{point}`, `.../blinds/{point}/status` (the
 status request `0B` of HAS-291, for `blinds-service`), `.../lights/{point}`,
+`.../lights/{point}/status` (the same `0B` for a light, HAS-259, for `light-service`),
 `.../lights/{point}/level` (`EatonCommandController`) → `EatonCommandService` →
 `EatonDeviceRegistry` (which gateway) → `EatonFrameBuilder` → `FrameServerClient`. 202 with
 `sentAt` once the server said `OK`. The contract for callers is in the README.
