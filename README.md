@@ -9,7 +9,7 @@
 ---
 ![GitHub top language](https://img.shields.io/github/languages/top/smart-home-automation-system/amx-service?style=plastic)
 ![Java](https://img.shields.io/badge/java-21-yellow?style=plastic)
-![SpringBoot](https://img.shields.io/badge/SpringBoot-4.1.1-blue?style=plastic)
+![SpringBoot](https://img.shields.io/badge/SpringBoot-4.1.2-blue?style=plastic)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=smart-home-automation-system_amx-service&metric=coverage)](https://sonarcloud.io/summary/new_code?id=smart-home-automation-system_amx-service)
 [![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=smart-home-automation-system_amx-service&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=smart-home-automation-system_amx-service)
 
@@ -69,6 +69,7 @@ receives nothing and cannot move a blind by accident; the client keeps trying, w
 
 | `device-events.password` | none — **mandatory** | the broker user `device` of the vhost `/device`; in the cluster from `DEVICE_EVENTS_PASSWORD` of the manifest, and a pod without it does not start |
 | `device-events.confirm-timeout` | `5s` | how long publishing one device event may take, the send and the confirmation of the broker together; 1 to 10 s, a bare number is seconds |
+| `notification.password` | none — **mandatory** | the broker user `notification` of the vhost `/notification`, for the alerts of the frame server; in the cluster from `notification-rabbitmq-password` of the manifest, and a pod without it does not start (`cholewa.required-properties`); the `local` profile has a dummy |
 
 The lookup in `database-service` is bounded by `internal.service.database.response-timeout`
 (default `PT5S`).
@@ -79,6 +80,16 @@ The lookup in `database-service` is bounded by `internal.service.database.respon
 with `connected: false` while it is not. It is **not** part of the readiness or the liveness
 group — a master that is switched off must neither take the pod out of the Service nor restart
 it in a loop; the client connects again by itself.
+
+### Alerts (HAS-309)
+
+Every minute the service looks at the socket. Not connected for **5 minutes** - after the start
+or after a lost connection - is an alert on Discord (through `notification-service`), a reminder
+**every hour** while it lasts, and an info when the socket is open again, with how long it was
+out. A short break (the reconnect after a dropped connection) says nothing. A notification the
+broker did not take is tried again a minute later; an alert that never got through is still
+announced by the info on the return. The state is in memory: a restart during an outage counts
+it again from the start.
 
 ## API
 
@@ -211,6 +222,7 @@ it writes share one `traceId`.
 |---|---|---|---|
 | publishes | fanout exchange `temperature.events` | `/temperature` | `TemperatureMessage` (room, temperature, date) |
 | publishes | topic exchange `amq.topic`, routing key `eaton.<gateway>.<point>` | `/device` | `DeviceEvent` of `smart-home-sdk` |
+| publishes | headers exchange `notification` (`category`, `env`, `level`) | `/notification` | plain text - the alerts of the frame server |
 
 **Device events** (since HAS-229): what an Eaton blind, light, dimmer, wall push button or PIR
 sensor reports — its status after a command, a button pressed, a motion detected (push buttons

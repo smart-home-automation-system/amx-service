@@ -5,7 +5,7 @@ the AMX master forwards every frame it receives from the Eaton wireless gateways
 socket, this service parses it, finds out which device the data point is and publishes the
 result on RabbitMQ — a room temperature for `heating-service`, what an actuator reports as a
 `DeviceEvent` for the services of the devices; commands for Eaton blinds and lights go back
-over the same socket as raw frames. Reactive (WebFlux), Java 21, Spring Boot 4.1.1 (`spring-boot-starter-parent`), Maven.
+over the same socket as raw frames. Reactive (WebFlux), Java 21, Spring Boot 4.1.2 (`spring-boot-starter-parent`, HAS-309), Maven.
 Local port **6001** (management **8001**); in the deployed `home` profile **6200** with Actuator
 on **8200**. Docker image `magikabdul/amx-service`; the pom keeps `0.0.1-SNAPSHOT`, the released
 version comes from the git tag. Not to be confused with `amx` (the NetLinx sources of the
@@ -131,6 +131,43 @@ status request `0B` of HAS-291, for `blinds-service`), `.../lights/{point}`,
 - **The frame server writes every byte in two digits** (`03`), the HTTP forwarder wrote none
   that were not needed (`3`): anything that compares a byte of a frame compares numbers
   (`TemperatureParser.byteOf`), never strings.
+
+## The watch of the frame server — read before touching `FrameServerWatch` (HAS-309)
+
+- **Why**: on 2026-10-22 the frame server was unreachable for 2.5 hours with one WARN in the log
+  (the client announces a master that is off once, then DEBUG) and nobody was told.
+- **Judged by duration** (HAS-109): every minute (`@Scheduled`, fixedDelay, inside
+  `ScheduledPass.bounded` - 50 s) the watch asks `FrameServerClient.isConnected()`. Closed counts
+  from the first pass that found it closed - from the start of the bean while it never
+  connected. Closed for `ALERT_AFTER` (5 min) is `publishAlert`, every `REMIND_EVERY` (1 h)
+  `publishReminder`, and open again `publishInfo` with the span. A short break is silent: no
+  alert was due, so no return either. **The durations are `Instant`s**, the clock of the house
+  only words the message: on the night the clock goes back a `LocalDateTime` would hold the
+  alert an hour (pinned by a test on 2026-10-25).
+- **A notification that did not get through is tried again with the next pass**; once an alert
+  was due, the return is announced even when no alert got through. Each publish is cut off after
+  `PUBLISH_TIMEOUT` (30 s) and logged at ERROR - it never fails or stalls the client: the watch
+  only reads the socket's state.
+- **What it cannot see**: a connection the master dropped without a word looks open until
+  `READ_IDLE_LIMIT` (5 min) closes it - such an outage is announced about ten minutes after it
+  began, counted from the close. **The state is in memory**: a restart during an outage counts
+  it again from the start (a second alert); no table for one bit of state.
+- **The connection of the notifications** (`NotificationRabbitConfig`, `NotificationConnectionProperties`,
+  `notification.*`) is the **fifth copy** of the class of heating, blinds, weather and light
+  (owner, 2026-10-22: stays copied, not moved to `cholewa-commons`) - a change goes into every
+  copy. A third connection to the broker (`<pod>/notification`, user `notification`), never a
+  bean, for the same reason as `DeviceEventConnection`; `cholewa.notification.enabled` stays
+  off - its publisher would go over the connection of `/temperature`. `notification.password`
+  has no default in the shared document: `cholewa.required-properties` refuses a start without
+  `notification-rabbitmq-password` (manifest: secret `rabbitmq`, key `notification-password`),
+  `local` has a dummy and `env: dev`, `test` `env: test`. `NotificationRabbitConfigTest` and
+  `RequiredPropertiesTest` are copies of those of light-service.
+- **Scheduling is off under `test`** (`SchedulingConfig`, `@Profile("!test")`), and the
+  scheduler has the pool of 10 of `cholewa-commons` 1.11.0 - pinned by `AmxServiceApplicationTest`.
+- **`cholewa-commons` 1.11.0** (from 1.9.0) also moved Logbook into the reactive chain (1.10.0):
+  the server side by its WebFilter, the calls of the injected `WebClient.Builder` by its filter in
+  place of logbook's own Netty customizer, so the lines carry the `traceId`; this service had no
+  `LogbookClientHandler` of its own to remove. The actuator stays out of the log (1.10.1).
 
 ## The call to database-service — read before touching `DeviceDatabaseClient`
 

@@ -72,6 +72,22 @@ device-events:
   exchange: amq.topic
   confirm-timeout: 5s
 
+# the notifications of the watch of the frame server (HAS-309), published over a third connection
+# to the same broker: the headers exchange of /notification routes by category and env. The
+# password has no default on purpose: with one the pod would start and fail every publish.
+# Without the variable the service does not start (cholewa.required-properties)
+notification:
+  virtual-host: /notification
+  username: notification
+  password: ${notification-rabbitmq-password}
+  exchange: notification
+  env: prod
+
+cholewa:
+  required-properties:
+    - property: notification.password
+      variable: notification-rabbitmq-password
+
 logbook:
   format:
     style: json
@@ -111,6 +127,11 @@ amx:
   frame-server:
     host: localhost
 
+# a local run starts without the variable; with it, its alerts go to the dev queues
+notification:
+  password: ${notification-rabbitmq-password:dummyPassword}
+  env: dev
+
 logbook:
   format:
     style: http
@@ -136,6 +157,11 @@ amx:
 # nothing connects in a test: the connection is opened by the first publish
 device-events:
   password: test
+
+# env test: no binding of the exchange matches it
+notification:
+  password: test
+  env: test
 
 logbook:
   format:
