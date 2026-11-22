@@ -6,7 +6,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-//The codes a caller of the Eaton commands may branch on are the names of these constants. A rename
+//The codes a caller of the Eaton commands and of the doorbell of the panel may branch on are the names of these constants. A rename
 //compiles and passes every other test of this service, and silently changes what the caller does -
 //so the names are written down here a second time
 class CustomErrorTest {
@@ -18,7 +18,10 @@ class CustomErrorTest {
         "NOT_A_DIMMER",
         "FRAME_SERVER_UNAVAILABLE",
         "FRAME_SERVER_TIMEOUT",
-        "FRAME_REFUSED"
+        "FRAME_REFUSED",
+        "PANEL_SERVER_UNAVAILABLE",
+        "PANEL_SERVER_TIMEOUT",
+        "PANEL_REFUSED"
     })
     void should_keep_the_names_the_callers_rely_on(final String code) {
         assertThat(ErrorId.codeOf(CustomError.valueOf(code))).isEqualTo(code);

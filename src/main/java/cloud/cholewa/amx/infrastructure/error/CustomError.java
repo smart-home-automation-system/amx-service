@@ -24,14 +24,17 @@ public enum CustomError implements ErrorId {
     DEVICE_EVENT_UNKNOWN_TYPE("Message type of a device not published as an event"),
     DEVICE_EVENT_VALUE_NOT_AN_INTEGER("Analog value of a device is not a whole number"),
 
-    //the causes of a command that was not carried out. Their names are the codes of the answer
+    //the causes of a command - of an Eaton device or of the entrance panel - that was not carried out. Their names are the codes of the answer
     //(ErrorId.codeOf) - wire contract for a caller that branches on them, pinned by CustomErrorTest
     NOT_FOUND_DEVICE("Device not found"),
     AMBIGUOUS_POINT("More than one device on the point"),
     NOT_A_DIMMER("Light is not a dimmer"),
     FRAME_SERVER_UNAVAILABLE("AMX frame server unavailable"),
     FRAME_SERVER_TIMEOUT("AMX frame server did not answer"),
-    FRAME_REFUSED("AMX frame server refused the frame");
+    FRAME_REFUSED("AMX frame server refused the frame"),
+    PANEL_SERVER_UNAVAILABLE("AMX panel server unavailable"),
+    PANEL_SERVER_TIMEOUT("AMX panel server did not answer"),
+    PANEL_REFUSED("AMX panel server refused the command");
 
     private final String description;
 }

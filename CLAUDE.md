@@ -5,7 +5,9 @@ the AMX master forwards every frame it receives from the Eaton wireless gateways
 socket, this service parses it, finds out which device the data point is and publishes the
 result on RabbitMQ — a room temperature for `heating-service`, what an actuator reports as a
 `DeviceEvent` for the services of the devices; commands for Eaton blinds and lights go back
-over the same socket as raw frames. Reactive (WebFlux), Java 21, Spring Boot 4.1.2 (`spring-boot-starter-parent`, HAS-309), Maven.
+over the same socket as raw frames. Since HAS-484 a second socket goes to the panel server of
+the Office master, which drives the entrance panel at the door. Reactive (WebFlux), Java 21,
+Spring Boot 4.1.3 (`spring-boot-starter-parent`, HAS-484), Maven.
 Local port **6001** (management **8001**); in the deployed `home` profile **6200** with Actuator
 on **8200**. Docker image `magikabdul/amx-service`; the pom keeps `0.0.1-SNAPSHOT`, the released
 version comes from the git tag. Not to be confused with `amx` (the NetLinx sources of the
@@ -53,7 +55,18 @@ status request `0B` of HAS-291, for `blinds-service`), `.../lights/{point}`,
 `EatonDeviceRegistry` (which gateway) → `EatonFrameBuilder` → `FrameServerClient`. 202 with
 `sentAt` once the server said `OK`. The contract for callers is in the README.
 
+The entrance panel (HAS-484, epic HAS-479): `POST /home/amx/panel/doorbell` (`PanelController`) →
+`PanelCommandService` → `PanelServerClient` sends `ring` to the panel server of the Office master
+(below, "The panel server").
+
 ## The socket — read before touching `FrameServerClient` or `EatonFrameReceiver`
+
+- **What the two sockets share is `LineServerClient`** (package `lineserver`, HAS-484): the
+  connection loop, the queue of the commands, the answers, the read idle limit and an optional
+  keepalive. `FrameServerClient` and `PanelServerClient` say what a line means (`unsolicited`),
+  what a failure is answered with (five hooks: not connected, lost, shut down, timed out,
+  refused) and what they hand out. The rules below are the base class's, held by
+  `FrameServerClientTest`; a change to it is a change to both sockets.
 
 - **The client connects at the start and again, with a backoff, whenever the connection
   ends** (`SmartLifecycle`; 1 s to 30 s between attempts, `RECONNECT_MIN` / `RECONNECT_MAX`):
@@ -132,6 +145,35 @@ status request `0B` of HAS-291, for `blinds-service`), `.../lights/{point}`,
   that were not needed (`3`): anything that compares a byte of a frame compares numbers
   (`TemperatureParser.byteOf`), never strings.
 
+## The panel server — read before touching `PanelServerClient` (HAS-484)
+
+- **A second socket, to the Office master** (NetLinx line server of HAS-488, port 20011): the
+  entrance panel 10003 is driven from there, so the Eaton frame server on Television and its
+  client are not touched. **The protocol is pinned in the `CLAUDE.md` of the `amx` repository**,
+  section "The line protocol of the panel server" — `ring`, `ping`, later `temp;<value>` and
+  `gate;ok` / `gate;failed` to the master, one `OK` / `ERR unknown command` per line back, and
+  `gate-open` unasked when the button on the panel is pressed.
+- **The keepalive**: the panel has nothing to say on its own for hours, and a connection quiet for
+  `READ_IDLE_LIMIT` (5 min) is taken for dead. So after `KEEPALIVE_AFTER` (1 min) without a line
+  from the master the client sends `ping` through the queue of the commands (never between a
+  command and its answer): its `OK` keeps a healthy connection, and a dead one leaves it
+  unanswered and is closed within `response-timeout` (owner, 2026-11-22: the ping instead of a
+  connection replaced, with a WARN, every five minutes).
+- **`panelLines()` is a multicast sink without a buffer** (`directBestEffort`): a press nobody
+  listens to - until HAS-487 subscribes - is an INFO line and gone, never replayed later.
+- **A failed command is a `PanelCommandException`**, answered by its own processor at ERROR:
+  503 `PANEL_SERVER_UNAVAILABLE` (not connected, lost before the answer, shut down), 504
+  `PANEL_SERVER_TIMEOUT`, 502 `PANEL_REFUSED` - wire contract, pinned by `CustomErrorTest`. The
+  Office master switched off touches neither the Eaton frames nor their commands.
+- **Health**: `panelServer`, shaped and grouped like `frameServer` - outside the probes. A lost
+  connection is a WARN of the base class; **no alert in this task** (the watch of HAS-309 looks at
+  the frame server alone).
+- **`amx.panel-server.host` has no default in the shared document** - `AMX_PANEL_SERVER_HOST` in
+  the manifest (the Office master); `local` points at `localhost`, `test` at `localhost:1`.
+- **The stop closes the connection** since HAS-484: until then the link was cleared by the cancel
+  of the connection loop before `stop()` read it, and a stopped client kept reading (seen in the
+  tests only - a pod that stops ends its JVM).
+
 ## The watch of the frame server — read before touching `FrameServerWatch` (HAS-309)
 
 - **Why**: on 2026-10-22 the frame server was unreachable for 2.5 hours with one WARN in the log
@@ -164,7 +206,9 @@ status request `0B` of HAS-291, for `blinds-service`), `.../lights/{point}`,
   `RequiredPropertiesTest` are copies of those of light-service.
 - **Scheduling is off under `test`** (`SchedulingConfig`, `@Profile("!test")`), and the
   scheduler has the pool of 10 of `cholewa-commons` 1.11.0 - pinned by `AmxServiceApplicationTest`.
-- **`cholewa-commons` 1.11.0** (from 1.9.0) also moved Logbook into the reactive chain (1.10.0):
+- **`cholewa-commons` 1.14.0** (1.11.0 since HAS-309, 1.14.0 since HAS-484 - additive: the household and
+  SMS publishing and `DomainExceptionProcessor`, none of them used here; `smart-home-sdk` 1.25.0, which
+  knows every kind of the registry). 1.11.0 (from 1.9.0) also moved Logbook into the reactive chain (1.10.0):
   the server side by its WebFilter, the calls of the injected `WebClient.Builder` by its filter in
   place of logbook's own Netty customizer, so the lines carry the `traceId`; this service had no
   `LogbookClientHandler` of its own to remove. The actuator stays out of the log (1.10.1).
@@ -313,7 +357,8 @@ status request `0B` of HAS-291, for `blinds-service`), `.../lights/{point}`,
 - `mvn verify` (JDK 21). `tidy-maven-plugin:check` runs in `verify` — after editing the pom run
   `mvn tidy:pom`. Mockito runs as an explicit `-javaagent` with **`@{argLine}` first** so JaCoCo's
   agent from the Sonar workflow survives.
-- `FrameServerClientTest` runs against `FrameServerStub`, a plain socket server in the test
+- `FrameServerClientTest` and `PanelServerClientTest` run against `LineServerStub` (package
+  `lineserver` of the tests, `FrameServerStub` until HAS-484), a plain socket server in the test
   sources: lines in, one line out, `push` for the frames the master sends unasked, any number of
   clients so the connections can be counted — **count them relative to what `setUp` opened**,
   the client connects by itself. A short response timeout belongs to the tests of a silent
@@ -362,4 +407,4 @@ status request `0B` of HAS-291, for `blinds-service`), `.../lights/{point}`,
 
 `CI.yml`, `sonar.yml` (SonarCloud + JaCoCo), `release.yml` (GitHub release → Docker image
 `magikabdul/amx-service`). Manifest: `deployment-tools/workshop/amx-service.yaml` (image tag
-and `AMX_FRAME_SERVER_HOST` pinned there). Release flow: the `release` skill.
+and `AMX_FRAME_SERVER_HOST` / `AMX_PANEL_SERVER_HOST` pinned there). Release flow: the `release` skill.

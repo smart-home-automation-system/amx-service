@@ -3,6 +3,7 @@ package cloud.cholewa.amx.frameserver;
 import cloud.cholewa.amx.config.FrameServerProperties;
 import cloud.cholewa.amx.infrastructure.error.CustomError;
 import cloud.cholewa.amx.infrastructure.error.EatonCommandException;
+import cloud.cholewa.amx.lineserver.LineServerStub;
 import cloud.cholewa.home.model.EatonGatewayType;
 import lombok.SneakyThrows;
 import org.junit.jupiter.api.AfterEach;
@@ -48,13 +49,13 @@ class FrameServerClientTest {
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 14, 20, 15, 30);
     private static final Clock CLOCK = Clock.fixed(NOW.atZone(ZoneId.systemDefault()).toInstant(), ZoneId.systemDefault());
 
-    private FrameServerStub server;
+    private LineServerStub server;
     private FrameServerClient sut;
 
     @SneakyThrows
     @BeforeEach
     void setUp() {
-        server = new FrameServerStub();
+        server = new LineServerStub();
         sut = connectedClient(TIMEOUT);
     }
 
@@ -326,7 +327,7 @@ class FrameServerClientTest {
 
     @Test
     void should_answer_a_bad_gateway_when_the_server_hangs_up_instead_of_answering() {
-        server.answers(line -> FrameServerStub.HANG_UP);
+        server.answers(line -> LineServerStub.HANG_UP);
 
         sut.send(EatonGatewayType.BLINDS, OPEN)
             .as(StepVerifier::create)
@@ -401,7 +402,7 @@ class FrameServerClientTest {
         pause(Duration.ofMillis(700));
         assertThat(sut.isConnected()).isFalse();
 
-        try (FrameServerStub late = new FrameServerStub(port)) {
+        try (LineServerStub late = new LineServerStub(port)) {
             await().atMost(PATIENCE).until(sut::isConnected);
 
             sut.send(EatonGatewayType.BLINDS, OPEN)

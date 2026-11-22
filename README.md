@@ -9,7 +9,7 @@
 ---
 ![GitHub top language](https://img.shields.io/github/languages/top/smart-home-automation-system/amx-service?style=plastic)
 ![Java](https://img.shields.io/badge/java-21-yellow?style=plastic)
-![SpringBoot](https://img.shields.io/badge/SpringBoot-4.1.2-blue?style=plastic)
+![SpringBoot](https://img.shields.io/badge/SpringBoot-4.1.3-blue?style=plastic)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=smart-home-automation-system_amx-service&metric=coverage)](https://sonarcloud.io/summary/new_code?id=smart-home-automation-system_amx-service)
 [![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=smart-home-automation-system_amx-service&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=smart-home-automation-system_amx-service)
 
@@ -43,6 +43,10 @@ permanent connection. This service is its only client:
 The line protocol of the socket is pinned next to the NetLinx module, in the `CLAUDE.md` of the
 `amx` repository; what this side does with it is in [The frame server](#the-frame-server).
 
+Since HAS-484 a second socket goes to the **panel server** of the Office master (port 20011),
+which drives the entrance panel at the door: the doorbell wakes it (see
+[The panel server](#the-panel-server)). The Eaton frame server is not touched by it.
+
 ## Run locally
 
 ```bash
@@ -66,6 +70,10 @@ receives nothing and cannot move a blind by accident; the client keeps trying, w
 | `amx.frame-server.port` | `20010` | |
 | `amx.frame-server.connect-timeout` | `2s` | one attempt to connect; the attempts go on, 1 s to 30 s apart, until one succeeds. 1 to 5 s, a bare number is seconds |
 | `amx.frame-server.response-timeout` | `3s` | the wait for the answer to a frame that was sent; 1 to 10 s, a bare number is seconds |
+| `amx.panel-server.host` | none — **mandatory** | the Office master; in the cluster from `AMX_PANEL_SERVER_HOST` of the manifest, and a pod without it does not start |
+| `amx.panel-server.port` | `20011` | |
+| `amx.panel-server.connect-timeout` | `2s` | as for the frame server |
+| `amx.panel-server.response-timeout` | `3s` | as for the frame server |
 
 | `device-events.password` | none — **mandatory** | the broker user `device` of the vhost `/device`; in the cluster from `DEVICE_EVENTS_PASSWORD` of the manifest, and a pod without it does not start |
 | `device-events.confirm-timeout` | `5s` | how long publishing one device event may take, the send and the confirmation of the broker together; 1 to 10 s, a bare number is seconds |
@@ -77,7 +85,8 @@ The lookup in `database-service` is bounded by `internal.service.database.respon
 ### Health
 
 `/actuator/health` carries `frameServer`: `UP` while the socket to the master is open, `DOWN`
-with `connected: false` while it is not. It is **not** part of the readiness or the liveness
+with `connected: false` while it is not - and `panelServer` the same way for the socket to the
+Office master (HAS-484). It is **not** part of the readiness or the liveness
 group — a master that is switched off must neither take the pod out of the Service nor restart
 it in a loop; the client connects again by itself.
 
@@ -104,6 +113,7 @@ Base path `/home` (`spring.webflux.base-path`); in the cluster the ingress route
 | POST | `/home/amx/eaton/lights/{point}?turn=on\|off` | Switch the Eaton light on a data point |
 | POST | `/home/amx/eaton/lights/{point}/status` | Ask the Eaton switching or dimming actuator on a data point for its status (HAS-259) |
 | POST | `/home/amx/eaton/lights/{point}/level?value=0..100` | Set the level, in percent, of the Eaton dimmer on a data point |
+| POST | `/home/amx/panel/doorbell` | Wake the entrance panel and show its doorbell page - no sound (HAS-484) |
 
 ### Eaton commands
 
@@ -158,6 +168,30 @@ Failures come in the error contract of `cholewa-commons`, with a `code` to branc
 | 502 / 504 | — | the registry of `database-service` failed or did not answer |
 
 The 5xx are logged at ERROR, the 4xx at WARN.
+
+### The doorbell of the entrance panel
+
+`POST /home/amx/panel/doorbell` sends `ring` to the panel server; `gate-service` calls it with the
+doorbell of the door station (HAS-485). No body.
+
+| Status | `code` | When |
+|---|---|---|
+| 202 | — | the master took it: `{"sentAt": "2026-11-22T18:30:05"}`, a local date-time of the house, to the second |
+| 503 | `PANEL_SERVER_UNAVAILABLE` | the socket to the panel server is not open (not sent), or the connection was lost before its answer |
+| 502 | `PANEL_REFUSED` | the panel server answered `ERR`; its reason is in `details` |
+| 504 | `PANEL_SERVER_TIMEOUT` | the panel server did not answer within `response-timeout` |
+
+Every failure is logged at ERROR.
+
+### The panel server
+
+A TCP server on the Office master (port 20011, epic HAS-479), the same transport as the frame
+server: text, one line per message, ended by LF, one `OK` / `ERR <reason>` per command. The
+commands are `ring` and `ping` (with the later tasks of the epic the outside temperature and the
+result of an opening); unasked the master sends `gate-open` when the button on the panel is
+pressed - handed on inside the service, and dropped with a line in the log while nothing takes it.
+The panel has nothing to say on its own, so after a minute without a line the client sends `ping`:
+its `OK` keeps the connection, and a dead connection leaves it unanswered and is opened again.
 
 ### The frame server
 
