@@ -43,7 +43,9 @@ class FrameServerHealthTest {
         assertThat(health.getT1()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
         assertThat(health.getT2())
             .endsWith("\"status\":\"DOWN\"}")
-            .contains("\"frameServer\":{\"details\":{\"connected\":false},\"status\":\"DOWN\"}");
+            .contains("\"frameServer\":{\"details\":{\"connected\":false},\"status\":\"DOWN\"}")
+            //the socket to the Office master, shown the same way (HAS-484)
+            .contains("\"panelServer\":{\"details\":{\"connected\":false},\"status\":\"DOWN\"}");
     }
 
     @Test
@@ -52,9 +54,9 @@ class FrameServerHealthTest {
         final Tuple2<HttpStatusCode, String> liveness = actuator("/actuator/health/liveness");
 
         assertThat(readiness.getT1()).isEqualTo(HttpStatus.OK);
-        assertThat(readiness.getT2()).endsWith("\"status\":\"UP\"}").doesNotContain("frameServer");
+        assertThat(readiness.getT2()).endsWith("\"status\":\"UP\"}").doesNotContain("frameServer", "panelServer");
         assertThat(liveness.getT1()).isEqualTo(HttpStatus.OK);
-        assertThat(liveness.getT2()).endsWith("\"status\":\"UP\"}").doesNotContain("frameServer");
+        assertThat(liveness.getT2()).endsWith("\"status\":\"UP\"}").doesNotContain("frameServer", "panelServer");
     }
 
     private Tuple2<HttpStatusCode, String> actuator(final String path) {

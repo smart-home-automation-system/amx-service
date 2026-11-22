@@ -2,9 +2,11 @@ package cloud.cholewa.amx.config;
 
 import cloud.cholewa.amx.infrastructure.error.ConfigurationCallException;
 import cloud.cholewa.amx.infrastructure.error.EatonCommandException;
+import cloud.cholewa.amx.infrastructure.error.PanelCommandException;
 import cloud.cholewa.amx.infrastructure.error.processor.ConfigurationCallExceptionProcessor;
 import cloud.cholewa.amx.infrastructure.error.processor.EatonCommandExceptionProcessor;
 import cloud.cholewa.amx.infrastructure.error.processor.InvalidRequestParameterProcessor;
+import cloud.cholewa.amx.infrastructure.error.processor.PanelCommandExceptionProcessor;
 import cloud.cholewa.commons.error.GlobalErrorExceptionHandler;
 import org.springframework.boot.autoconfigure.web.WebProperties;
 import org.springframework.boot.webflux.error.ErrorAttributes;
@@ -17,7 +19,8 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 
 import java.util.Map;
 
-//the commands are the only requests this service answers: the frames of the gateways come
+//the commands are the only requests this service answers - of the Eaton devices and, since HAS-484,
+//of the entrance panel: the frames of the gateways come
 //through the socket of the frame server and their failures are log lines of EatonFrameReceiver.
 //A failed call to database-service is still answered here - the registry a command asks which
 //gateway a point is on fails the same way the configuration lookup of a frame does
@@ -40,6 +43,7 @@ public class ExceptionHandlerConfig {
             Map.ofEntries(
                 Map.entry(ConfigurationCallException.class, new ConfigurationCallExceptionProcessor()),
                 Map.entry(EatonCommandException.class, new EatonCommandExceptionProcessor()),
+                Map.entry(PanelCommandException.class, new PanelCommandExceptionProcessor()),
                 Map.entry(HandlerMethodValidationException.class, new InvalidRequestParameterProcessor())
             )
         );

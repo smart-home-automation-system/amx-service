@@ -60,6 +60,13 @@ amx:
     port: 20010
     connect-timeout: 2s
     response-timeout: 3s
+  # the TCP server of the Office master that drives the entrance panel (HAS-484). The host has no
+  # default here on purpose: it comes from the manifest (AMX_PANEL_SERVER_HOST), and a pod without
+  # it must not start
+  panel-server:
+    port: 20011
+    connect-timeout: 2s
+    response-timeout: 3s
 
 # the events of the Eaton actuators (HAS-229), published over a second connection to the same
 # broker as spring.rabbitmq.*: the virtual host of the devices, where the Shelly devices publish
@@ -126,6 +133,8 @@ internal:
 amx:
   frame-server:
     host: localhost
+  panel-server:
+    host: localhost
 
 # a local run starts without the variable; with it, its alerts go to the dev queues
 notification:
@@ -151,6 +160,9 @@ spring:
 # a port nothing listens on: a context of a test never reaches the AMX master
 amx:
   frame-server:
+    host: localhost
+    port: 1
+  panel-server:
     host: localhost
     port: 1
 

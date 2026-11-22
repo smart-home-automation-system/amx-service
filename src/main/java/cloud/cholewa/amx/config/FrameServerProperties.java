@@ -4,6 +4,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import cloud.cholewa.amx.lineserver.LineServerEndpoint;
 import org.hibernate.validator.constraints.time.DurationMax;
 import org.hibernate.validator.constraints.time.DurationMin;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -35,5 +36,5 @@ public record FrameServerProperties(
     @DefaultValue("2s") Duration connectTimeout,
     @NotNull @DurationMin(seconds = 1) @DurationMax(seconds = 10) @DurationUnit(ChronoUnit.SECONDS)
     @DefaultValue("3s") Duration responseTimeout
-) {
+) implements LineServerEndpoint {
 }
