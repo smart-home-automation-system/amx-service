@@ -71,17 +71,22 @@ public class OutsideTemperatureClient {
             });
     }
 
-    //a stale reading is not known; a metric that is not the model is a failed call
+    //a stale reading is not known; a temperature that is not the model is a failed call
     private static String shown(final Map<String, CurrentMetric> current) {
         final CurrentMetric temperature = Optional.ofNullable(current.get(METRIC))
-            .filter(metric -> metric.value() != null && metric.stale() != null)
+            .filter(metric -> metric.value() instanceof Number && metric.stale() != null)
             .orElseThrow(() -> new IllegalStateException("weather-service answered no temperature: " + current.keySet()));
         return Boolean.TRUE.equals(temperature.stale())
             ? NOT_KNOWN
-            : temperature.value().setScale(1, RoundingMode.HALF_UP).toPlainString();
+            //through its text: a double read as it was written (0.8, not 0.8000000000000000444)
+            : new BigDecimal(temperature.value().toString()).setScale(1, RoundingMode.HALF_UP).toPlainString();
     }
 
-    /** One metric of {@code /current}, as much of it as the panel needs. */
-    record CurrentMetric(BigDecimal value, Boolean stale) {
+    /**
+     * One metric of {@code /current}, as much of it as the panel needs. The value is whatever the
+     * metric holds - {@code raining} is a boolean -, so only the temperature is checked to be a number:
+     * a {@code BigDecimal} here failed the whole answer on the first read in the cluster (2026-11-23).
+     */
+    record CurrentMetric(Object value, Boolean stale) {
     }
 }

@@ -72,6 +72,34 @@ class OutsideTemperatureClientTest {
         expectRead(shown);
     }
 
+    //what weather-service 0.8.0 answered on 2026-11-23: raining is a boolean, the others numbers -
+    //the first release of this client failed the whole answer on it
+    @Test
+    void should_read_the_temperature_from_the_whole_answer_whatever_the_other_metrics_hold() {
+        answer("""
+            {"battery":{"value":97,"measuredAt":"2026-11-23T14:09:34","stale":false},
+             "pressure":{"value":980.2,"measuredAt":"2026-11-23T14:12:12","stale":false},
+             "raining":{"value":false,"measuredAt":"2026-11-23T14:09:43","stale":false},
+             "humidity":{"value":87,"measuredAt":"2026-11-23T14:10:29","stale":false},
+             "temperature":{"value":0.8,"measuredAt":"2026-11-23T14:09:34","stale":false},
+             "windDirection":{"value":258.0,"measuredAt":"2026-11-23T14:12:29","stale":false},
+             "precipitation":{"value":5065,"measuredAt":"2026-11-23T14:09:34","stale":false},
+             "airQualityLevel":{"value":1,"measuredAt":"2026-11-23T14:10:39","stale":false}}
+            """);
+
+        expectRead("0.8");
+        assertThat(warnings()).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"true", "{\"c\":1}", "[1]"})
+    void should_take_a_temperature_that_is_no_number_for_a_failed_call(final String value) {
+        answer("{\"temperature\":{\"value\":" + value + ",\"stale\":false}}");
+
+        expectRead("");
+        assertThat(warnings()).hasSize(1);
+    }
+
     @SneakyThrows
     @Test
     void should_ask_the_current_weather_of_weather_service() {

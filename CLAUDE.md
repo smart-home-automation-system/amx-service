@@ -176,7 +176,9 @@ read from `weather-service` (HAS-486).
   (`internal.service.weather`, k8s DNS, the shared `WebClient`, bounded at `response-timeout` 5 s), the metric
   `temperature` - `temp;<value>` with one decimal (`HALF_UP`, a point, `-0.04` is `0.0`), `temp;` for a stale
   reading and for **every failed read** (no body, an error status, JSON that is not the model - `{}`, a metric
-  without `value` or `stale`, a text value): never a zero on the panel. A failing read is a WARN once and DEBUG
+  without `value` or `stale`, a temperature that is no number): never a zero on the panel. **The other
+  metrics hold anything** (`raining` is a boolean): `CurrentMetric.value` is an `Object`, only the temperature is
+  checked - 2.7.0 read every value as a number and failed every answer of the cluster (2.7.1). A failing read is a WARN once and DEBUG
   while it keeps failing, an INFO when it works again - weather-service away is no alert here.
   **Sent only when it is not what the master took last on this connection** (`Shown(value, connection)`,
   in memory), so a quiet panel gets one line a change, not one a minute. **The master forgets it on a
