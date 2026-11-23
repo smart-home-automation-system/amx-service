@@ -5,6 +5,7 @@ import cloud.cholewa.amx.config.FrameServerProperties;
 import cloud.cholewa.amx.config.NotificationConnectionProperties;
 import cloud.cholewa.amx.config.PanelServerProperties;
 import cloud.cholewa.amx.device.client.DeviceDatabaseClientConfig;
+import cloud.cholewa.amx.weather.WeatherServiceProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -12,7 +13,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 @SpringBootApplication
 @EnableConfigurationProperties({
     DeviceDatabaseClientConfig.class, FrameServerProperties.class, DeviceEventsProperties.class,
-    NotificationConnectionProperties.class, PanelServerProperties.class
+    NotificationConnectionProperties.class, PanelServerProperties.class, WeatherServiceProperties.class
 })
 public class AmxServiceApplication {
 

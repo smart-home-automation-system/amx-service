@@ -57,7 +57,8 @@ status request `0B` of HAS-291, for `blinds-service`), `.../lights/{point}`,
 
 The entrance panel (HAS-484, epic HAS-479): `POST /home/amx/panel/doorbell` (`PanelController`) →
 `PanelCommandService` → `PanelServerClient` sends `ring` to the panel server of the Office master
-(below, "The panel server").
+(below, "The panel server"). And every minute `PanelTemperature` sends it the outside temperature
+read from `weather-service` (HAS-486).
 
 ## The socket — read before touching `FrameServerClient` or `EatonFrameReceiver`
 
@@ -150,7 +151,7 @@ The entrance panel (HAS-484, epic HAS-479): `POST /home/amx/panel/doorbell` (`Pa
 - **A second socket, to the Office master** (NetLinx line server of HAS-488, port 20011): the
   entrance panel 10003 is driven from there, so the Eaton frame server on Television and its
   client are not touched. **The protocol is pinned in the `CLAUDE.md` of the `amx` repository**,
-  section "The line protocol of the panel server" — `ring`, `ping`, later `temp;<value>` and
+  section "The line protocol of the panel server" — `ring`, `ping`, `temp;<value>` (HAS-486), later
   `gate;ok` / `gate;failed` to the master, one `OK` / `ERR unknown command` per line back, and
   `gate-open` unasked when the button on the panel is pressed.
 - **The keepalive**: the panel has nothing to say on its own for hours, and a connection quiet for
@@ -170,6 +171,22 @@ The entrance panel (HAS-484, epic HAS-479): `POST /home/amx/panel/doorbell` (`Pa
   the frame server alone).
 - **`amx.panel-server.host` has no default in the shared document** - `AMX_PANEL_SERVER_HOST` in
   the manifest (the Office master); `local` points at `localhost`, `test` at `localhost:1`.
+- **The outside temperature** (HAS-486, `PanelTemperature`, `weather/OutsideTemperatureClient`): every minute
+  (`@Scheduled`, inside `ScheduledPass.bounded` - 50 s) `GET /home/weather/current` of weather-service
+  (`internal.service.weather`, k8s DNS, the shared `WebClient`, bounded at `response-timeout` 5 s), the metric
+  `temperature` - `temp;<value>` with one decimal (`HALF_UP`, a point, `-0.04` is `0.0`), `temp;` for a stale
+  reading and for **every failed read** (no body, an error status, JSON that is not the model - `{}`, a metric
+  without `value` or `stale`, a text value): never a zero on the panel. A failing read is a WARN once and DEBUG
+  while it keeps failing, an INFO when it works again - weather-service away is no alert here.
+  **Sent only when it is not what the master took last on this connection** (`Shown(value, connection)`,
+  in memory), so a quiet panel gets one line a change, not one a minute. **The master forgets it on a
+  disconnect**: `LineServerClient.connected()` - a hook called on every new connection, on its thread,
+  before any command - numbers the connections of `PanelServerClient` (`connections()`,
+  `connectionNumber()`), and every new one is told the last value read once it held for `SETTLE` (10 s) -
+  not at once: a server that takes the connection and never answers would be asked, timed out and
+  reconnected every four seconds (review of HAS-486). A panel server that is
+  not connected is not asked (no 503 a minute in the log); a command it refused or lost is sent again
+  with the next pass - a WARN once per value and connection, a DEBUG while the same is refused again.
 - **The stop closes the connection** since HAS-484: until then the link was cleared by the cancel
   of the connection loop before `stop()` read it, and a stopped client kept reading (seen in the
   tests only - a pod that stops ends its JVM).
