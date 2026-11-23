@@ -58,7 +58,8 @@ status request `0B` of HAS-291, for `blinds-service`), `.../lights/{point}`,
 The entrance panel (HAS-484, epic HAS-479): `POST /home/amx/panel/doorbell` (`PanelController`) →
 `PanelCommandService` → `PanelServerClient` sends `ring` to the panel server of the Office master
 (below, "The panel server"). And every minute `PanelTemperature` sends it the outside temperature
-read from `weather-service` (HAS-486).
+read from `weather-service` (HAS-486). A press of its gate button (`gate-open`) is the driveway gate
+opened through `gate-service` and the result told back to the panel (`PanelGateButton`, HAS-487).
 
 ## The socket — read before touching `FrameServerClient` or `EatonFrameReceiver`
 
@@ -151,8 +152,8 @@ read from `weather-service` (HAS-486).
 - **A second socket, to the Office master** (NetLinx line server of HAS-488, port 20011): the
   entrance panel 10003 is driven from there, so the Eaton frame server on Television and its
   client are not touched. **The protocol is pinned in the `CLAUDE.md` of the `amx` repository**,
-  section "The line protocol of the panel server" — `ring`, `ping`, `temp;<value>` (HAS-486), later
-  `gate;ok` / `gate;failed` to the master, one `OK` / `ERR unknown command` per line back, and
+  section "The line protocol of the panel server" — `ring`, `ping`, `temp;<value>` (HAS-486),
+  `gate;ok` / `gate;failed` (HAS-487) to the master, one `OK` / `ERR unknown command` per line back, and
   `gate-open` unasked when the button on the panel is pressed.
 - **The keepalive**: the panel has nothing to say on its own for hours, and a connection quiet for
   `READ_IDLE_LIMIT` (5 min) is taken for dead. So after `KEEPALIVE_AFTER` (1 min) without a line
@@ -161,7 +162,19 @@ read from `weather-service` (HAS-486).
   unanswered and is closed within `response-timeout` (owner, 2026-11-22: the ping instead of a
   connection replaced, with a WARN, every five minutes).
 - **`panelLines()` is a multicast sink without a buffer** (`directBestEffort`): a press nobody
-  listens to - until HAS-487 subscribes - is an INFO line and gone, never replayed later.
+  listens to is an INFO line and gone, never replayed later; `PanelGateButton` subscribes before the
+  socket connects (`@PostConstruct`, HAS-487).
+- **The gate button** (HAS-487, `PanelGateButton`, `gate/GateClient`): every `gate-open` is
+  `POST /home/gate/open?source=panel` of gate-service (>= 0.11.0, HAS-483; `internal.service.gate`, k8s DNS,
+  the shared `WebClient`, bounded at `response-timeout` 10 s), **sent once and never repeated** - a call cut off
+  may have opened the gate. A 2xx and `409` with the code `OPEN_TOO_SOON` (an opening of the last seconds:
+  the gate is moving) are `gate;ok` to the panel, anything else - a 3xx too - `gate;failed` and a WARN with the
+  status alone (the body of gate-service goes nowhere) or the kind of failure; a timeout is worded as a gate that
+  may have opened all the same. **One press at a time and never a queue** (`onBackpressureDrop` + `concatMap`
+  without a prefetch, review of HAS-487): a press kept waiting behind a gate-service that hangs would open the
+  gate long after the person left, so a press while one is handled is dropped with an INFO. Each press runs under an
+  observation of its own (`panel.gate`), so its lines and the call of gate-service share a `traceId`. A press
+  while the panel socket is down never arrives - lost by design; a result the panel cannot be told is a WARN.
 - **A failed command is a `PanelCommandException`**, answered by its own processor at ERROR:
   503 `PANEL_SERVER_UNAVAILABLE` (not connected, lost before the answer, shut down), 504
   `PANEL_SERVER_TIMEOUT`, 502 `PANEL_REFUSED` - wire contract, pinned by `CustomErrorTest`. The
