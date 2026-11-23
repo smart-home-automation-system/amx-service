@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * <ul>
  * <li>to the master: {@code ring} (wake the panel and show the doorbell page), {@code ping} (the
  * keepalive), {@code temp;<value>} (the outside temperature, HAS-486; {@code temp;} not known), and
- * with a later task of the epic {@code gate;ok} / {@code gate;failed};</li>
+ * {@code gate;ok} / {@code gate;failed} (the result of an opening the panel asked for, HAS-487);</li>
  * <li>from the master: one answer per line, {@code OK} or {@code ERR unknown command}, and
  * unasked {@code gate-open} - the button on the panel was pressed, never answered.</li>
  * </ul>
@@ -47,6 +47,8 @@ public class PanelServerClient extends LineServerClient {
     static final String RING = "ring";
     static final String PING = "ping";
     static final String TEMPERATURE = "temp;";
+    static final String GATE_OK = "gate;ok";
+    static final String GATE_FAILED = "gate;failed";
 
     private final Object emitting = new Object();
     //a button nobody listens to is no backlog to replay later: a press is now or never
@@ -99,6 +101,14 @@ public class PanelServerClient extends LineServerClient {
      */
     public Mono<Void> temperature(final String value) {
         return sendLine(TEMPERATURE + value);
+    }
+
+    /**
+     * Tells the panel the result of the opening it asked for (HAS-487): {@code gate;ok} while the gate
+     * is opening, {@code gate;failed} otherwise; completes when the master answered {@code OK}.
+     */
+    public Mono<Void> gateResult(final boolean opening) {
+        return sendLine(opening ? GATE_OK : GATE_FAILED);
     }
 
     /** Wakes the panel and shows the doorbell page; completes when the master answered {@code OK}. */

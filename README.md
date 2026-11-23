@@ -76,6 +76,8 @@ receives nothing and cannot move a blind by accident; the client keeps trying, w
 | `amx.panel-server.response-timeout` | `3s` | as for the frame server |
 | `internal.service.weather.host` / `.port` | `weather-service` / `6200` | where the outside temperature of the panel is read (`localhost` / `6010` in `local`) |
 | `internal.service.weather.response-timeout` | `5s` | one read of the temperature; 1 to 20 s, a bare number is seconds |
+| `internal.service.gate.host` / `.port` | `gate-service` / `6200` | where the gate is opened for the panel (`localhost` / `6016` in `local`) |
+| `internal.service.gate.response-timeout` | `10s` | one opening; 1 to 20 s, a bare number is seconds |
 
 | `device-events.password` | none — **mandatory** | the broker user `device` of the vhost `/device`; in the cluster from `DEVICE_EVENTS_PASSWORD` of the manifest, and a pod without it does not start |
 | `device-events.confirm-timeout` | `5s` | how long publishing one device event may take, the send and the confirmation of the broker together; 1 to 10 s, a bare number is seconds |
@@ -189,9 +191,8 @@ Every failure is logged at ERROR.
 
 A TCP server on the Office master (port 20011, epic HAS-479), the same transport as the frame
 server: text, one line per message, ended by LF, one `OK` / `ERR <reason>` per command. The
-commands are `ring`, `ping` and `temp;<value>` (with a later task of the epic the result of an
-opening); unasked the master sends `gate-open` when the button on the panel is
-pressed - handed on inside the service, and dropped with a line in the log while nothing takes it.
+commands are `ring`, `ping`, `temp;<value>` and `gate;ok` / `gate;failed`; unasked the master sends
+`gate-open` when the gate button on the panel is pressed.
 The panel has nothing to say on its own, so after a minute without a line the client sends `ping`:
 its `OK` keeps the connection, and a dead connection leaves it unanswered and is opened again.
 
@@ -201,6 +202,12 @@ of `weather-service` and sends the temperature as `temp;<value>` - one decimal w
 never a zero. The master forgets the value when the connection ends, so every new connection is
 told the last value once it has held for ten seconds. A panel server that is not connected is not asked; a value it does not
 take is sent again a minute later.
+
+**The gate button** (HAS-487): a press (`gate-open`) opens the driveway gate through `gate-service`
+(`POST /home/gate/open?source=panel`, sent once and never repeated) and tells the panel `gate;ok` while the
+gate is opening - an opening of the last seconds (`409 OPEN_TOO_SOON`) included - or `gate;failed`. The
+presses are handled one at a time - a press while one is handled is ignored, never queued - and a press while the
+socket to the panel server is down is lost.
 
 ### The frame server
 

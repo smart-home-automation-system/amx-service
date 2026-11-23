@@ -55,6 +55,10 @@ internal:
     weather:
       host: weather-service
       port: 6200
+    # the gate opened when the entrance panel asks (HAS-487)
+    gate:
+      host: gate-service
+      port: 6200
 
 # the TCP server of the AMX master that writes Eaton frames to the serial gateways. The host has
 # no default here on purpose: it comes from the manifest (AMX_FRAME_SERVER_HOST), and a pod
@@ -135,6 +139,9 @@ internal:
     weather:
       host: localhost
       port: 6010
+    gate:
+      host: localhost
+      port: 6016
 
 # nothing listens there unless a stub is started: a local run cannot move a blind by accident
 amx:
@@ -168,6 +175,9 @@ spring:
 internal:
   service:
     weather:
+      host: localhost
+      port: 1
+    gate:
       host: localhost
       port: 1
 
