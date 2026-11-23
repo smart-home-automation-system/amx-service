@@ -51,6 +51,10 @@ internal:
     database:
       host: database-service
       port: 6200
+    # the outside temperature of the entrance panel (HAS-486)
+    weather:
+      host: weather-service
+      port: 6200
 
 # the TCP server of the AMX master that writes Eaton frames to the serial gateways. The host has
 # no default here on purpose: it comes from the manifest (AMX_FRAME_SERVER_HOST), and a pod
@@ -128,6 +132,9 @@ internal:
     database:
       host: localhost
       port: 6005
+    weather:
+      host: localhost
+      port: 6010
 
 # nothing listens there unless a stub is started: a local run cannot move a blind by accident
 amx:
@@ -156,6 +163,13 @@ spring:
   config:
     activate:
       on-profile: test
+
+# nothing listens there: a context of a test reaches no service (and schedules nothing)
+internal:
+  service:
+    weather:
+      host: localhost
+      port: 1
 
 # a port nothing listens on: a context of a test never reaches the AMX master
 amx:

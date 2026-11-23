@@ -14,6 +14,7 @@ import reactor.core.publisher.Sinks;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * The client of the panel server of the Office master (HAS-484, epic HAS-479): a TCP server in
@@ -22,8 +23,8 @@ import java.time.Duration;
  * line protocol is pinned in the {@code CLAUDE.md} of the {@code amx} repository:
  * <ul>
  * <li>to the master: {@code ring} (wake the panel and show the doorbell page), {@code ping} (the
- * keepalive), and with the later tasks of the epic {@code temp;<value>} and {@code gate;ok} /
- * {@code gate;failed};</li>
+ * keepalive), {@code temp;<value>} (the outside temperature, HAS-486; {@code temp;} not known), and
+ * with a later task of the epic {@code gate;ok} / {@code gate;failed};</li>
  * <li>from the master: one answer per line, {@code OK} or {@code ERR unknown command}, and
  * unasked {@code gate-open} - the button on the panel was pressed, never answered.</li>
  * </ul>
@@ -45,10 +46,14 @@ public class PanelServerClient extends LineServerClient {
 
     static final String RING = "ring";
     static final String PING = "ping";
+    static final String TEMPERATURE = "temp;";
 
     private final Object emitting = new Object();
     //a button nobody listens to is no backlog to replay later: a press is now or never
     private final Sinks.Many<PanelLine> lines = Sinks.many().multicast().directBestEffort();
+    //the number of every connection opened, for what has to be told again on a new one (HAS-486)
+    private final Sinks.Many<Long> connections = Sinks.many().multicast().directBestEffort();
+    private final AtomicLong connectionNumber = new AtomicLong();
 
     @Autowired
     public PanelServerClient(final PanelServerProperties properties, final Clock clock) {
@@ -75,6 +80,27 @@ public class PanelServerClient extends LineServerClient {
         return lines.asFlux();
     }
 
+    /**
+     * Every connection the moment it is opened, by its number ({@link #connectionNumber()}), for as
+     * long as the client runs: the master forgets what the panel showed when the client goes away.
+     */
+    public Flux<Long> connections() {
+        return connections.asFlux();
+    }
+
+    /** The number of the connection opened last; 0 before the first one. */
+    public long connectionNumber() {
+        return connectionNumber.get();
+    }
+
+    /**
+     * Shows the outside temperature on the panel (HAS-486): one decimal with a point, or the empty
+     * text for "not known"; completes when the master answered {@code OK}.
+     */
+    public Mono<Void> temperature(final String value) {
+        return sendLine(TEMPERATURE + value);
+    }
+
     /** Wakes the panel and shows the doorbell page; completes when the master answered {@code OK}. */
     public Mono<Void> ring() {
         return sendLine(RING);
@@ -91,9 +117,18 @@ public class PanelServerClient extends LineServerClient {
     }
 
     @Override
+    protected void connected() {
+        final long number = connectionNumber.incrementAndGet();
+        synchronized (emitting) {
+            connections.tryEmitNext(number);
+        }
+    }
+
+    @Override
     protected void stopped() {
         synchronized (emitting) {
             lines.tryEmitComplete();
+            connections.tryEmitComplete();
         }
     }
 

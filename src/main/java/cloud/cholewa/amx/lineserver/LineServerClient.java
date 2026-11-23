@@ -164,6 +164,14 @@ public abstract class LineServerClient implements SmartLifecycle {
     /** The server answered {@code ERR}; the reason is short and printable. */
     protected abstract RuntimeException refused(String reason);
 
+    /**
+     * Called every time a connection is opened, before any command is carried out on it: a server
+     * that forgets what it was told when its client goes away (the panel server, HAS-486) is told it
+     * again. Never blocks and never throws: it runs on the thread of the connection.
+     */
+    protected void connected() {
+    }
+
     /** Called once at the stop, after the connection is closed: the subclass ends what it hands out. */
     protected void stopped() {
     }
@@ -293,6 +301,7 @@ public abstract class LineServerClient implements SmartLifecycle {
                 link.set(opened);
                 failedAttempts.set(0);
                 log.info("Connected to the {}", name);
+                connected();
                 return opened.ended()
                     .doFinally(signal -> {
                         link.compareAndSet(opened, null);

@@ -44,8 +44,8 @@ The line protocol of the socket is pinned next to the NetLinx module, in the `CL
 `amx` repository; what this side does with it is in [The frame server](#the-frame-server).
 
 Since HAS-484 a second socket goes to the **panel server** of the Office master (port 20011),
-which drives the entrance panel at the door: the doorbell wakes it (see
-[The panel server](#the-panel-server)). The Eaton frame server is not touched by it.
+which drives the entrance panel at the door: the doorbell wakes it, and since HAS-486 it shows the
+outside temperature of the weather station (see [The panel server](#the-panel-server)). The Eaton frame server is not touched by it.
 
 ## Run locally
 
@@ -60,7 +60,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=home,local
 | cluster (`home` profile) | 6200 | 8200 |
 
 The `local` profile expects `database-service` on `localhost:6005` and RabbitMQ on
-`localhost:5672`; the Actuator exposes `health`, `info` and `prometheus`. It looks for the frame
+`localhost:5672` (and `weather-service` on `localhost:6010` for the temperature of the panel); the Actuator exposes `health`, `info` and `prometheus`. It looks for the frame
 server on `localhost:20010`, where nothing listens unless a stand-in is started — a local run
 receives nothing and cannot move a blind by accident; the client keeps trying, with a backoff.
 
@@ -74,6 +74,8 @@ receives nothing and cannot move a blind by accident; the client keeps trying, w
 | `amx.panel-server.port` | `20011` | |
 | `amx.panel-server.connect-timeout` | `2s` | as for the frame server |
 | `amx.panel-server.response-timeout` | `3s` | as for the frame server |
+| `internal.service.weather.host` / `.port` | `weather-service` / `6200` | where the outside temperature of the panel is read (`localhost` / `6010` in `local`) |
+| `internal.service.weather.response-timeout` | `5s` | one read of the temperature; 1 to 20 s, a bare number is seconds |
 
 | `device-events.password` | none — **mandatory** | the broker user `device` of the vhost `/device`; in the cluster from `DEVICE_EVENTS_PASSWORD` of the manifest, and a pod without it does not start |
 | `device-events.confirm-timeout` | `5s` | how long publishing one device event may take, the send and the confirmation of the broker together; 1 to 10 s, a bare number is seconds |
@@ -187,11 +189,18 @@ Every failure is logged at ERROR.
 
 A TCP server on the Office master (port 20011, epic HAS-479), the same transport as the frame
 server: text, one line per message, ended by LF, one `OK` / `ERR <reason>` per command. The
-commands are `ring` and `ping` (with the later tasks of the epic the outside temperature and the
-result of an opening); unasked the master sends `gate-open` when the button on the panel is
+commands are `ring`, `ping` and `temp;<value>` (with a later task of the epic the result of an
+opening); unasked the master sends `gate-open` when the button on the panel is
 pressed - handed on inside the service, and dropped with a line in the log while nothing takes it.
 The panel has nothing to say on its own, so after a minute without a line the client sends `ping`:
 its `OK` keeps the connection, and a dead connection leaves it unanswered and is opened again.
+
+**The outside temperature** (HAS-486): every minute the service reads `GET /home/weather/current`
+of `weather-service` and sends the temperature as `temp;<value>` - one decimal with a point
+(`temp;-3.4`) - when it changed; `temp;` (not known) when the reading is stale or cannot be read,
+never a zero. The master forgets the value when the connection ends, so every new connection is
+told the last value once it has held for ten seconds. A panel server that is not connected is not asked; a value it does not
+take is sent again a minute later.
 
 ### The frame server
 
