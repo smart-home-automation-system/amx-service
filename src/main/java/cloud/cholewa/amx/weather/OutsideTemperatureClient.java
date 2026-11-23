@@ -32,7 +32,8 @@ public class OutsideTemperatureClient {
     static final String METRIC = "temperature";
     static final String NOT_KNOWN = "";
 
-    private static final ParameterizedTypeReference<Map<String, CurrentMetric>> CURRENT_WEATHER =
+    //the whole answer as plain JSON: only the temperature is read, so no other metric can fail it
+    private static final ParameterizedTypeReference<Map<String, Object>> CURRENT_WEATHER =
         new ParameterizedTypeReference<>() { };
 
     private final WebClient webClient;
@@ -72,9 +73,12 @@ public class OutsideTemperatureClient {
     }
 
     //a stale reading is not known; a temperature that is not the model is a failed call
-    private static String shown(final Map<String, CurrentMetric> current) {
+    private static String shown(final Map<String, Object> current) {
         final CurrentMetric temperature = Optional.ofNullable(current.get(METRIC))
-            .filter(metric -> metric.value() instanceof Number && metric.stale() != null)
+            .filter(Map.class::isInstance)
+            .map(metric -> (Map<?, ?>) metric)
+            .map(metric -> new CurrentMetric(metric.get("value"), metric.get("stale")))
+            .filter(metric -> metric.value() instanceof Number && metric.stale() instanceof Boolean)
             .orElseThrow(() -> new IllegalStateException("weather-service answered no temperature: " + current.keySet()));
         return Boolean.TRUE.equals(temperature.stale())
             ? NOT_KNOWN
@@ -83,10 +87,10 @@ public class OutsideTemperatureClient {
     }
 
     /**
-     * One metric of {@code /current}, as much of it as the panel needs. The value is whatever the
-     * metric holds - {@code raining} is a boolean -, so only the temperature is checked to be a number:
-     * a {@code BigDecimal} here failed the whole answer on the first read in the cluster (2026-11-23).
+     * The temperature of {@code /current}, as much of it as the panel needs. Read out of the plain
+     * JSON of the whole answer: the other metrics hold anything ({@code raining} is a boolean), and a
+     * model of every metric failed the whole answer on the first read in the cluster (2026-11-23).
      */
-    record CurrentMetric(Object value, Boolean stale) {
+    private record CurrentMetric(Object value, Object stale) {
     }
 }

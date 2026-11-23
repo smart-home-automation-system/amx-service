@@ -62,7 +62,7 @@ class OutsideTemperatureClientTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"3.4, 3.4", "-3.44, -3.4", "-3.45, -3.5", "21, 21.0", "0.04, 0.0", "-0.04, 0.0", "12.25, 12.3"})
+    @CsvSource({"3.4, 3.4", "-3.44, -3.4", "-3.45, -3.5", "21, 21.0", "0.04, 0.0", "-0.04, 0.0", "12.25, 12.3", "1e-4, 0.0", "-12.25e0, -12.3", "2.5E1, 25.0"})
     void should_show_the_temperature_with_one_decimal_and_a_point(final String value, final String shown) {
         answer("""
             {"humidity":{"value":81,"measuredAt":"2026-11-23T12:00:00","stale":false},
@@ -84,7 +84,8 @@ class OutsideTemperatureClientTest {
              "temperature":{"value":0.8,"measuredAt":"2026-11-23T14:09:34","stale":false},
              "windDirection":{"value":258.0,"measuredAt":"2026-11-23T14:12:29","stale":false},
              "precipitation":{"value":5065,"measuredAt":"2026-11-23T14:09:34","stale":false},
-             "airQualityLevel":{"value":1,"measuredAt":"2026-11-23T14:10:39","stale":false}}
+             "airQualityLevel":{"value":1,"measuredAt":"2026-11-23T14:10:39","stale":false},
+             "futureFlag":true, "futureList":[1, 2], "futureText":{"value":"x","stale":"maybe"}}
             """);
 
         expectRead("0.8");
@@ -133,6 +134,8 @@ class OutsideTemperatureClientTest {
         "{\"temperature\":{\"value\":3.4}}",
         "{\"temperature\":{\"stale\":false}}",
         "{\"temperature\":{\"value\":\"warm\",\"stale\":false}}",
+        "{\"temperature\":{\"value\":3.4,\"stale\":\"false\"}}",
+        "{\"temperature\":3.4}",
         "[]",
         "not json"
     })
