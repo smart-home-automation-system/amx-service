@@ -32,7 +32,8 @@ public class OutsideTemperatureClient {
     static final String METRIC = "temperature";
     static final String NOT_KNOWN = "";
 
-    private static final ParameterizedTypeReference<Map<String, CurrentMetric>> CURRENT_WEATHER =
+    //the whole answer as plain JSON: only the temperature is read, so no other metric can fail it
+    private static final ParameterizedTypeReference<Map<String, Object>> CURRENT_WEATHER =
         new ParameterizedTypeReference<>() { };
 
     private final WebClient webClient;
@@ -71,17 +72,25 @@ public class OutsideTemperatureClient {
             });
     }
 
-    //a stale reading is not known; a metric that is not the model is a failed call
-    private static String shown(final Map<String, CurrentMetric> current) {
+    //a stale reading is not known; a temperature that is not the model is a failed call
+    private static String shown(final Map<String, Object> current) {
         final CurrentMetric temperature = Optional.ofNullable(current.get(METRIC))
-            .filter(metric -> metric.value() != null && metric.stale() != null)
+            .filter(Map.class::isInstance)
+            .map(metric -> (Map<?, ?>) metric)
+            .map(metric -> new CurrentMetric(metric.get("value"), metric.get("stale")))
+            .filter(metric -> metric.value() instanceof Number && metric.stale() instanceof Boolean)
             .orElseThrow(() -> new IllegalStateException("weather-service answered no temperature: " + current.keySet()));
         return Boolean.TRUE.equals(temperature.stale())
             ? NOT_KNOWN
-            : temperature.value().setScale(1, RoundingMode.HALF_UP).toPlainString();
+            //through its text: a double read as it was written (0.8, not 0.8000000000000000444)
+            : new BigDecimal(temperature.value().toString()).setScale(1, RoundingMode.HALF_UP).toPlainString();
     }
 
-    /** One metric of {@code /current}, as much of it as the panel needs. */
-    record CurrentMetric(BigDecimal value, Boolean stale) {
+    /**
+     * The temperature of {@code /current}, as much of it as the panel needs. Read out of the plain
+     * JSON of the whole answer: the other metrics hold anything ({@code raining} is a boolean), and a
+     * model of every metric failed the whole answer on the first read in the cluster (2026-11-23).
+     */
+    private record CurrentMetric(Object value, Object stale) {
     }
 }
